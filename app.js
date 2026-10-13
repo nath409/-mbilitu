@@ -16,7 +16,8 @@ let rooms = [];
 let posts = [];
 
 function notify(message) {
-    $("message").textContent = message;
+    const element = $("message");
+    if (element) element.textContent = message;
 }
 
 function escapeHTML(value = "") {
@@ -45,6 +46,8 @@ async function loadPrograms() {
 
     ["signupProgram", "targetProgram"].forEach(id => {
         const select = $(id);
+        if (!select) return;
+
         select.innerHTML = id === "targetProgram"
             ? '<option value="">No programme</option>'
             : '<option value="">Choose your programme</option>';
@@ -65,7 +68,10 @@ async function loadProfile() {
     if (error) throw error;
 
     profile = data;
-    if (!profile) throw new Error("Your user profile was not found.");
+
+    if (!profile) {
+        throw new Error("Your user profile was not found.");
+    }
 }
 
 async function loadRooms() {
@@ -75,6 +81,7 @@ async function loadRooms() {
         .order("name");
 
     if (error) throw error;
+
     rooms = data || [];
 }
 
@@ -101,7 +108,8 @@ function renderRooms() {
 
     $("classroomList").innerHTML = rooms.map(room => {
         const roomPosts = posts.filter(post =>
-            post.classroom_id === room.id && activeAt(post, now)
+            String(post.classroom_id) === String(room.id) &&
+            activeAt(post, now)
         );
 
         const status = roomPosts.length ? "In use" : "Empty";
@@ -120,7 +128,7 @@ function renderRooms() {
             <article class="room">
                 <h3>${escapeHTML(room.name)}</h3>
                 ${image}
-                <p>Building: ${escapeHTML(room.building)}</p>
+                <p>Building: ${escapeHTML(room.building || "")}</p>
                 <p>Capacity: ${room.capacity}</p>
                 <p class="status ${statusClass}">Status: ${status}</p>
                 ${currentLectures}
@@ -128,7 +136,8 @@ function renderRooms() {
         `;
     }).join("") || "<p>No classrooms have been added yet.</p>";
 
-    $("postRoom").innerHTML = '<option value="">Choose classroom</option>';
+    $("postRoom").innerHTML =
+        '<option value="">Choose classroom</option>';
 
     rooms.forEach(room => {
         $("postRoom").add(new Option(room.name, room.id));
@@ -136,10 +145,10 @@ function renderRooms() {
 }
 
 function renderPosts() {
-    // RLS is the real security boundary. This filter is an
-    // additional interface safeguard for students.
     const visiblePosts = profile.role === "student"
-        ? posts.filter(post => post.program_id === profile.program_id)
+        ? posts.filter(post =>
+            String(post.program_id) === String(profile.program_id)
+        )
         : posts;
 
     $("postsHeading").textContent = profile.role === "student"
@@ -147,41 +156,57 @@ function renderPosts() {
         : "All programme announcements";
 
     $("postsList").innerHTML = visiblePosts.map(post => {
-        const isOwner = post.posted_by === currentUser.id;
+        const isOwner =
+            String(post.posted_by) === String(currentUser.id);
+
         const canCancel = !post.cancelled &&
             (profile.role === "admin" || isOwner);
 
         return `
             <article class="post">
                 <h3>${escapeHTML(post.title)}</h3>
+
                 <p><strong>Programme:</strong>
                     ${escapeHTML(post.programs?.name || "Unknown")}</p>
+
                 <p><strong>Classroom:</strong>
                     ${escapeHTML(post.classrooms?.name || "Unknown")}</p>
+
                 <p><strong>Building:</strong>
                     ${escapeHTML(post.classrooms?.building || "")}</p>
-                <p><strong>Starts:</strong> ${dateText(post.start_time)}</p>
-                <p><strong>Duration:</strong> ${post.duration_minutes} minutes</p>
-                <p>${escapeHTML(post.details)}</p>
+
+                <p><strong>Starts:</strong>
+                    ${dateText(post.start_time)}</p>
+
+                <p><strong>Duration:</strong>
+                    ${post.duration_minutes} minutes</p>
+
+                <p>${escapeHTML(post.details || "")}</p>
+
                 ${post.cancelled
                     ? '<p class="cancelled">LECTURE CANCELLED</p>'
                     : ""}
+
                 ${canCancel
-                    ? `<button data-cancel="${post.id}">Cancel lecture</button>`
+                    ? `<button type="button" data-cancel="${post.id}">Cancel lecture</button>`
                     : ""}
             </article>
         `;
     }).join("") || "<p>No announcements available.</p>";
 
     document.querySelectorAll("[data-cancel]").forEach(button => {
-        button.addEventListener("click", () =>
-            cancelPost(Number(button.dataset.cancel))
-        );
+        button.addEventListener("click", () => {
+            cancelPost(Number(button.dataset.cancel));
+        });
     });
 }
 
 async function refreshDashboard() {
-    await Promise.all([loadRooms(), loadPosts()]);
+    await Promise.all([
+        loadRooms(),
+        loadPosts()
+    ]);
+
     renderRooms();
     renderPosts();
 }
@@ -193,7 +218,9 @@ async function showDashboard() {
     $("dashboard").hidden = false;
     $("logoutBtn").hidden = false;
 
-    const program = programs.find(p => p.id === profile.program_id);
+    const program = programs.find(
+        p => String(p.id) === String(profile.program_id)
+    );
 
     $("welcomeTitle").textContent =
         `Welcome, ${profile.full_name || "User"}`;
@@ -207,6 +234,7 @@ async function showDashboard() {
     await refreshDashboard();
 }
 
+// LOGIN
 $("loginForm").addEventListener("submit", async event => {
     event.preventDefault();
 
@@ -226,10 +254,7 @@ $("loginForm").addEventListener("submit", async event => {
             password
         });
 
-        if (error) {
-            console.error("Supabase login error:", error);
-            throw error;
-        }
+        if (error) throw error;
 
         currentUser = data.user;
 
@@ -244,9 +269,7 @@ $("loginForm").addEventListener("submit", async event => {
     }
 });
 
-
-
-
+// SIGN UP
 $("signupForm").addEventListener("submit", async event => {
     event.preventDefault();
 
@@ -265,19 +288,21 @@ $("signupForm").addEventListener("submit", async event => {
 
         if (error) throw error;
 
-        // Account confirmation may be required by Supabase.
         if (!data.session) {
-            notify("Account created. Check your email to confirm, then log in. Ask an admin to assign your programme.");
+            notify(
+                "Account created. Check your email to confirm, then log in. Ask an admin to assign your programme."
+            );
             return;
         }
 
         currentUser = data.user;
 
-        // Users may choose only their own programme, not their role.
         const programId = Number($("signupProgram").value);
 
         if (!programId) {
-            notify("Account created. Log in and ask an admin to assign your programme.");
+            notify(
+                "Account created. Log in and ask an admin to assign your programme."
+            );
             return;
         }
 
@@ -290,12 +315,16 @@ $("signupForm").addEventListener("submit", async event => {
 
         await loadPrograms();
         await showDashboard();
+
         notify("Student account created.");
+
     } catch (error) {
-        notify(error.message);
+        console.error("Sign-up failed:", error);
+        notify("Sign-up failed: " + error.message);
     }
 });
 
+// ADD CLASSROOM
 $("classroomForm").addEventListener("submit", async event => {
     event.preventDefault();
 
@@ -306,11 +335,18 @@ $("classroomForm").addEventListener("submit", async event => {
         const file = $("roomImage").files[0];
 
         if (file) {
-            if (!file.type.startsWith("image/") || file.size > 5 * 1024 * 1024) {
+            if (
+                !file.type.startsWith("image/") ||
+                file.size > 5 * 1024 * 1024
+            ) {
                 throw new Error("Choose an image under 5 MB.");
             }
 
-            const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+            const safeName = file.name.replace(
+                /[^a-zA-Z0-9._-]/g,
+                "_"
+            );
+
             const path = `${crypto.randomUUID()}-${safeName}`;
 
             const { error: uploadError } = await db.storage
@@ -334,13 +370,18 @@ $("classroomForm").addEventListener("submit", async event => {
         if (error) throw error;
 
         $("classroomForm").reset();
+
         await refreshDashboard();
+
         notify("Classroom saved successfully.");
+
     } catch (error) {
-        notify(error.message);
+        console.error("Classroom error:", error);
+        notify("Classroom error: " + error.message);
     }
 });
 
+// UPDATE USER ROLE AND PROGRAMME
 $("roleForm").addEventListener("submit", async event => {
     event.preventDefault();
 
@@ -349,78 +390,149 @@ $("roleForm").addEventListener("submit", async event => {
         const role = $("targetRole").value;
         const programValue = $("targetProgram").value;
 
-        const { error } = await db.from("profiles")
+        if (!uid) {
+            throw new Error("Enter the user's ID.");
+        }
+
+        const { error } = await db
+            .from("profiles")
             .update({
                 role,
-                program_id: programValue ? Number(programValue) : null
+                program_id: programValue
+                    ? Number(programValue)
+                    : null
             })
             .eq("id", uid);
 
         if (error) throw error;
 
         notify("User role and programme updated.");
+
     } catch (error) {
-        notify(error.message);
+        console.error("Role update error:", error);
+        notify("Role update error: " + error.message);
     }
 });
 
+// POST LECTURE ANNOUNCEMENT
 $("postForm").addEventListener("submit", async event => {
     event.preventDefault();
 
     try {
+        notify("Publishing lecture announcement...");
+
+        if (!currentUser || !profile) {
+            throw new Error("Please log in again.");
+        }
+
+        if (profile.role !== "class_rep" && profile.role !== "admin") {
+            throw new Error(
+                "Only class representatives and administrators can post lectures."
+            );
+        }
+
         if (!profile.program_id) {
-            throw new Error("An administrator must assign your programme first.");
+            throw new Error(
+                "An administrator must assign your programme first."
+            );
         }
 
         const start = new Date($("postStart").value);
 
-        if (Number.isNaN(start.getTime()) || start <= new Date()) {
+        if (
+            !Number.isFinite(start.getTime()) ||
+            start <= new Date()
+        ) {
             throw new Error("Choose a future lecture start time.");
         }
 
         const roomId = Number($("postRoom").value);
         const duration = Number($("postDuration").value);
+        const title = $("postTitle").value.trim();
+        const details = $("postDetails").value.trim();
+
+        if (!roomId || !rooms.some(
+            room => String(room.id) === String(roomId)
+        )) {
+            throw new Error("Please select a valid classroom.");
+        }
+
+        if (!Number.isFinite(duration) || duration <= 0) {
+            throw new Error("Enter a valid lecture duration.");
+        }
+
+        if (!title) {
+            throw new Error("Enter the lecture title.");
+        }
+
         const end = start.getTime() + duration * 60000;
 
         const conflict = posts.some(post => {
-            if (post.classroom_id !== roomId || post.cancelled) return false;
+            if (
+                String(post.classroom_id) !== String(roomId) ||
+                post.cancelled
+            ) {
+                return false;
+            }
 
             const otherStart = new Date(post.start_time).getTime();
-            const otherEnd = otherStart + post.duration_minutes * 60000;
+            const otherEnd =
+                otherStart + Number(post.duration_minutes) * 60000;
 
-            return start.getTime() < otherEnd && end > otherStart;
+            return (
+                start.getTime() < otherEnd &&
+                end > otherStart
+            );
         });
 
         if (conflict) {
-            throw new Error("This classroom already has a scheduled lecture during that time.");
+            throw new Error(
+                "This classroom already has a scheduled lecture during that time."
+            );
         }
 
-        const { error } = await db.from("lecture_posts").insert({
+        const lectureData = {
             program_id: profile.program_id,
             classroom_id: roomId,
             posted_by: currentUser.id,
-            title: $("postTitle").value.trim(),
-            details: $("postDetails").value.trim(),
+            title,
+            details,
             start_time: start.toISOString(),
             duration_minutes: duration
-        });
+        };
+
+        console.log("Submitting lecture announcement.");
+
+        const { data, error } = await db
+            .from("lecture_posts")
+            .insert(lectureData)
+            .select();
 
         if (error) throw error;
 
-        $("postForm").reset();
-        await refreshDashboard();
-        notify("Lecture announcement published.");
-    }
-} catch (error) {
-    console.error("LECTURE POST ERROR:", error);
-    notify("Lecture error: " + (error.message || JSON.stringify(error)));
-}
+        console.log("Lecture announcement saved successfully.");
 
-    
+        $("postForm").reset();
+
+        await refreshDashboard();
+
+        notify("Lecture announcement published.");
+
+    } catch (error) {
+        console.error("LECTURE POST ERROR:", error);
+
+        notify(
+            "Lecture error: " +
+            (error.message || JSON.stringify(error))
+        );
+    }
 });
 
+// CANCEL LECTURE
 async function cancelPost(id) {
-    if (!confirm("Are you sure you want to cancel this lecture?")) return;
+    if (!confirm("Are you sure you want to cancel this lecture?")) {
+        return;
+    }
 
     try {
         const { error } = await db
@@ -431,47 +543,54 @@ async function cancelPost(id) {
         if (error) throw error;
 
         await refreshDashboard();
+
         notify("Lecture cancelled.");
+
     } catch (error) {
-        notify(error.message);
+        console.error("Cancel lecture error:", error);
+        notify("Cancel lecture error: " + error.message);
     }
 }
 
+// LOG OUT
 $("logoutBtn").addEventListener("click", async () => {
-    const { error } = await db.auth.signOut();
+    try {
+        const { error } = await db.auth.signOut();
 
-    if (error) {
-        notify(error.message);
-        return;
+        if (error) throw error;
+
+        currentUser = null;
+        profile = null;
+
+        $("dashboard").hidden = true;
+        $("authSection").hidden = false;
+        $("logoutBtn").hidden = true;
+
+        notify("You have logged out.");
+
+    } catch (error) {
+        console.error("Logout error:", error);
+        notify("Logout error: " + error.message);
     }
-
-    currentUser = null;
-    profile = null;
-    $("dashboard").hidden = true;
-    $("authSection").hidden = false;
-    $("logoutBtn").hidden = true;
-    notify("You have logged out.");
 });
 
+// START APPLICATION
 async function startApp() {
     try {
-        if (SUPABASE_URL.includes("YOUR_") ||
-            SUPABASE_KEY.includes("YOUR_")) {
-            notify("Add your Supabase Project URL and publishable key in app.js.");
-            return;
-        }
-
         await loadPrograms();
 
         const { data, error } = await db.auth.getSession();
+
         if (error) throw error;
 
         if (data.session) {
             currentUser = data.session.user;
             await showDashboard();
         }
+
     } catch (error) {
-        notify(error.message);
+        console.error("Application startup error:", error);
+        notify("Application error: " + error.message);
     }
 }
 
@@ -479,6 +598,7 @@ db.auth.onAuthStateChange((event, session) => {
     if (event === "SIGNED_OUT") {
         currentUser = null;
         profile = null;
+
         $("dashboard").hidden = true;
         $("authSection").hidden = false;
         $("logoutBtn").hidden = true;
@@ -486,3 +606,4 @@ db.auth.onAuthStateChange((event, session) => {
 });
 
 startApp();
+
