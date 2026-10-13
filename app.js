@@ -213,21 +213,39 @@ $("loginForm").addEventListener("submit", async event => {
     try {
         notify("Logging in...");
 
-        const { error } = await db.auth.signInWithPassword({
-            email: $("email").value.trim(),
-            password: $("password").value
+        const email = $("email").value.trim();
+        const password = $("password").value;
+
+        if (!email || !password) {
+            notify("Please enter your email and password.");
+            return;
+        }
+
+        const { data, error } = await db.auth.signInWithPassword({
+            email,
+            password
         });
 
-        if (error) throw error;
+        if (error) {
+            console.error("Supabase login error:", error);
+            throw error;
+        }
 
-        currentUser = (await db.auth.getUser()).data.user;
+        currentUser = data.user;
+
         await loadPrograms();
         await showDashboard();
+
         notify("Login successful.");
+
     } catch (error) {
-        notify(error.message);
+        console.error("Login failed:", error);
+        notify("Login failed: " + error.message);
     }
 });
+
+
+
 
 $("signupForm").addEventListener("submit", async event => {
     event.preventDefault();
