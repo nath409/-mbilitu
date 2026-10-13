@@ -1,0 +1,149 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mukuba University Classroom System</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="app.js" defer></script>
+</head>
+<body>
+<header>
+    <h2>🎓 Mukuba Classroom System</h2>
+    <button id="logoutBtn" hidden>Log out</button>
+</header>
+
+<main>
+    <section id="authSection" class="panel">
+        <h1>Welcome</h1>
+        <p>Log in or create a student account.</p>
+
+        <form id="loginForm">
+            <label for="email">Email address</label>
+            <input id="email" type="email" required>
+
+            <label for="password">Password</label>
+            <input id="password" type="password" required>
+
+            <button type="submit">Log in</button>
+        </form>
+
+        <hr>
+
+        <h3>Create student account</h3>
+        <form id="signupForm">
+            <label for="fullName">Full name</label>
+            <input id="fullName" required>
+
+            <label for="signupEmail">Email address</label>
+            <input id="signupEmail" type="email" required>
+
+            <label for="signupPassword">Password (at least 8 characters)</label>
+            <input id="signupPassword" type="password" minlength="8" required>
+
+            <label for="signupProgram">Your programme</label>
+            <select id="signupProgram" required>
+                <option value="">Loading programmes...</option>
+            </select>
+
+            <button type="submit">Register as student</button>
+        </form>
+    </section>
+
+    <section id="dashboard" hidden>
+        <div class="panel">
+            <h1 id="welcomeTitle">Dashboard</h1>
+            <p id="userInfo"></p>
+            <p id="message" role="status" aria-live="polite"></p>
+        </div>
+
+        <section id="adminPanel" class="panel" hidden>
+            <h2>Add classroom</h2>
+            <form id="classroomForm">
+                <label for="roomName">Classroom name</label>
+                <input id="roomName" placeholder="e.g. Lecture Room 1" required>
+
+                <label for="building">Building</label>
+                <input id="building" required>
+
+                <label for="capacity">Capacity</label>
+                <input id="capacity" type="number" min="0" required>
+
+                <label for="roomImage">Classroom picture</label>
+                <input id="roomImage" type="file" accept="image/*">
+
+                <button type="submit">Save classroom</button>
+            </form>
+
+            <h2>Assign user role</h2>
+            <p>Enter an existing user's Auth UID. Obtain it from Supabase Authentication.</p>
+            <form id="roleForm">
+                <label for="targetUid">User Auth UID</label>
+                <input id="targetUid" required>
+
+                <label for="targetRole">Role</label>
+                <select id="targetRole">
+                    <option value="student">Student</option>
+                    <option value="lecturer">Lecturer</option>
+                    <option value="class_rep">Class representative</option>
+                    <option value="admin">Admin</option>
+                </select>
+
+                <label for="targetProgram">Assigned programme</label>
+                <select id="targetProgram">
+                    <option value="">No programme</option>
+                </select>
+
+                <button type="submit">Update user</button>
+            </form>
+        </section>
+
+        <section id="repPanel" class="panel" hidden>
+            <h2>Post a lecture</h2>
+            <form id="postForm">
+                <label for="postTitle">Lecture title</label>
+                <input id="postTitle" placeholder="e.g. Database Systems" required>
+
+                <label for="postDetails">Additional details</label>
+                <textarea id="postDetails"></textarea>
+
+                <label for="postRoom">Choose classroom</label>
+                <select id="postRoom" required></select>
+
+                <label for="postStart">Lecture start date and time</label>
+                <input id="postStart" type="datetime-local" required>
+
+                <label for="postDuration">Duration</label>
+                <select id="postDuration">
+                    <option value="30">30 minutes</option>
+                    <option value="60">1 hour</option>
+                    <option value="90">1 hour 30 minutes</option>
+                    <option value="120">2 hours</option>
+                    <option value="180">3 hours</option>
+                    <option value="240">4 hours</option>
+                </select>
+
+                <button type="submit">Publish lecture</button>
+            </form>
+        </section>
+
+        <section class="panel">
+            <h2>Classroom availability</h2>
+            <p>Availability is calculated from active lecture times.</p>
+            <div id="classroomList"></div>
+        </section>
+
+        <section class="panel">
+            <h2 id="postsHeading">Lecture announcements</h2>
+            <div id="postsList"></div>
+        </section>
+    </section>
+</main>
+
+<footer>
+    <p>Mukuba University · Classroom Management System</p>
+</footer>
+</body>
+</html>
