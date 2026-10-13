@@ -410,9 +410,13 @@ $("postForm").addEventListener("submit", async event => {
         $("postForm").reset();
         await refreshDashboard();
         notify("Lecture announcement published.");
-    } catch (error) {
-        notify(error.message);
     }
+} catch (error) {
+    console.error("LECTURE POST ERROR:", error);
+    notify("Lecture error: " + (error.message || JSON.stringify(error)));
+}
+
+    
 });
 
 async function cancelPost(id) {
