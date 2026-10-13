@@ -1,0 +1,150 @@
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    font-family: Arial, sans-serif;
+    background: #f2f5f9;
+    color: #202938;
+}
+
+header {
+    background: #12366b;
+    color: white;
+    padding: 18px 6%;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 15px;
+}
+
+header h2 {
+    font-size: 21px;
+    margin: 0;
+}
+
+main {
+    width: min(1000px, 94%);
+    margin: 28px auto;
+}
+
+.panel {
+    background: white;
+    padding: 22px;
+    margin-bottom: 22px;
+    border-radius: 10px;
+    box-shadow: 0 2px 9px #0000000c;
+}
+
+h1, h2, h3 {
+    color: #12366b;
+}
+
+label {
+    display: block;
+    margin-top: 14px;
+    margin-bottom: 6px;
+    font-weight: bold;
+}
+
+input, select, textarea {
+    display: block;
+    width: 100%;
+    padding: 11px;
+    border: 1px solid #cbd5e1;
+    border-radius: 5px;
+    background: white;
+    font: inherit;
+}
+
+textarea {
+    min-height: 85px;
+    resize: vertical;
+}
+
+button {
+    background: #12366b;
+    color: white;
+    border: none;
+    padding: 12px 17px;
+    border-radius: 5px;
+    margin-top: 16px;
+    cursor: pointer;
+    font-weight: bold;
+}
+
+button:hover {
+    background: #20549a;
+}
+
+button:disabled {
+    opacity: .6;
+    cursor: wait;
+}
+
+#logoutBtn {
+    margin-top: 0;
+    background: #ffffff;
+    color: #12366b;
+}
+
+.room, .post {
+    border: 1px solid #dbe3ee;
+    border-radius: 8px;
+    padding: 16px;
+    margin: 12px 0;
+    overflow-wrap: anywhere;
+}
+
+.room img {
+    display: block;
+    width: 100%;
+    max-width: 380px;
+    max-height: 230px;
+    object-fit: cover;
+    border-radius: 6px;
+    margin: 12px 0;
+}
+
+.status {
+    font-weight: bold;
+}
+
+.empty {
+    color: #187647;
+}
+
+.occupied {
+    color: #b42318;
+}
+
+.cancelled {
+    color: #b42318;
+    font-weight: bold;
+}
+
+footer {
+    text-align: center;
+    color: #596579;
+    padding: 20px;
+}
+
+[hidden] {
+    display: none !important;
+}
+
+@media (max-width: 600px) {
+    header {
+        padding: 15px;
+    }
+
+    header h2 {
+        font-size: 17px;
+    }
+
+    .panel {
+        padding: 16px;
+    }
+}
