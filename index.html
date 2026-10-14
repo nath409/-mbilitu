@@ -54,7 +54,25 @@
             <button type="submit">Register as student</button>
         </form>
     </section>
+<section id="resetPasswordSection" class="panel" hidden>
+    <h2>Reset your password</h2>
+    <p>Enter your new password below.</p>
 
+    <form id="resetPasswordForm">
+        <label for="newPassword">New password</label>
+        <input
+            id="newPassword"
+            type="password"
+            minlength="8"
+            required
+            autocomplete="new-password"
+        >
+
+        <button type="submit">Save new password</button>
+    </form>
+
+    <p id="resetMessage" role="status" aria-live="polite"></p>
+</section>
     <section id="dashboard" hidden>
         <div class="panel">
             <h1 id="welcomeTitle">Dashboard</h1>
