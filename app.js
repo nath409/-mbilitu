@@ -1,7 +1,7 @@
 
 /* =========================================================
    MUKUBA UNIVERSITY CLASSROOM MANAGEMENT SYSTEM
-   Complete app.js
+   Complete app.js — corrected navigation
 ========================================================= */
 
 const SUPABASE_URL = "https://mbieizajeifupzuokefx.supabase.co";
@@ -111,15 +111,11 @@ function friendlyError(error) {
     return error.message || "An unexpected error occurred.";
 }
 
-/*
-  Important login fix:
-  Set both the hidden property and display style so that a CSS
-  rule does not accidentally keep the login page visible.
-*/
 function setVisible(element, visible) {
     if (!element) return;
 
     element.hidden = !visible;
+
     element.style.setProperty(
         "display",
         visible ? "block" : "none",
@@ -131,6 +127,7 @@ function showAuth() {
     setVisible($("authSection"), true);
     setVisible($("resetPasswordSection"), false);
     setVisible($("dashboard"), false);
+    setVisible($("logoutButton"), false);
 }
 
 function showResetPassword() {
@@ -143,7 +140,9 @@ function showDashboard() {
     setVisible($("authSection"), false);
     setVisible($("resetPasswordSection"), false);
     setVisible($("dashboard"), true);
-    showPage("overview");
+    setVisible($("logoutButton"), true);
+
+    showPage("overviewPage");
 }
 
 function updateYear() {
@@ -267,7 +266,9 @@ async function loadProfile() {
     if ($("adminNotice")) {
         $("adminNotice").textContent = isAdmin()
             ? "Administrator access is enabled."
-            : "";
+            : "Administrator access is required.";
+
+        setVisible($("adminNotice"), !isAdmin());
     }
 }
 
@@ -609,29 +610,55 @@ function renderOverview() {
 }
 
 /* =========================================================
-   NAVIGATION
+   NAVIGATION — FIXED TO MATCH index.html
 ========================================================= */
 
 function showPage(pageName) {
-    document.querySelectorAll(".page-section, .dashboard-page")
-        .forEach(page => page.classList.remove("active"));
+    if (!pageName) return;
 
-    const target = $(`${pageName}Page`);
+    // Accept both "overview" and "overviewPage".
+    const pageId = String(pageName).endsWith("Page")
+        ? String(pageName)
+        : `${pageName}Page`;
 
-    if (target) {
-        target.classList.add("active");
+    const target = $(pageId);
+
+    // Only activate real dashboard page sections.
+    if (!target || !target.classList.contains("page")) {
+        console.warn("Navigation page not found:", pageId);
+        return;
     }
 
-    document.querySelectorAll(".nav-item[data-page]")
-        .forEach(button => {
-            button.classList.toggle(
-                "active",
-                button.dataset.page === pageName
-            );
-        });
+    // Hide all dashboard pages and show the selected page.
+    document.querySelectorAll("#dashboard .page").forEach(page => {
+        page.classList.toggle("active", page.id === pageId);
+    });
+
+    // Highlight the selected navigation button.
+    document.querySelectorAll(".nav-item[data-page]").forEach(button => {
+        button.classList.toggle(
+            "active",
+            button.dataset.page === pageId
+        );
+    });
 }
 
+// Allow the HTML brand link to call showPage().
 window.showPage = showPage;
+
+// Connect Overview, Classrooms, Announcements, Administration and My account.
+document.querySelectorAll(".nav-item[data-page]").forEach(button => {
+    button.addEventListener("click", () => {
+        showPage(button.dataset.page);
+    });
+});
+
+// Connect "View all" buttons on the overview page.
+document.querySelectorAll("[data-go-page]").forEach(button => {
+    button.addEventListener("click", () => {
+        showPage(button.dataset.goPage);
+    });
+});
 
 /* =========================================================
    REFRESH DASHBOARD
@@ -675,9 +702,6 @@ async function enterDashboard() {
         await loadClassrooms();
         await loadPosts();
 
-        /*
-          Hide the login page explicitly and show the dashboard.
-        */
         showDashboard();
 
         renderRooms();
@@ -722,7 +746,9 @@ $("loginForm")?.addEventListener("submit", async event => {
         currentUser = data.user || data.session?.user || null;
 
         if (!currentUser) {
-            throw new Error("Login succeeded, but the user session was not returned.");
+            throw new Error(
+                "Login succeeded, but the user session was not returned."
+            );
         }
 
         await enterDashboard();
@@ -791,6 +817,7 @@ $("signupForm")?.addEventListener("submit", async event => {
             );
         }
     } catch (error) {
+        console.error("Signup error:", error);
         notify(friendlyError(error), "error");
     }
 });
@@ -805,7 +832,10 @@ $("forgotPasswordLink")?.addEventListener("click", async event => {
     const email = $("loginEmail")?.value.trim();
 
     if (!email) {
-        notify("Enter your email in the login email field first.", "error");
+        notify(
+            "Enter your email in the login email field first.",
+            "error"
+        );
         return;
     }
 
@@ -836,7 +866,10 @@ $("resetPasswordForm")?.addEventListener("submit", async event => {
     const confirmation = $("confirmPassword")?.value;
 
     if (!password || password.length < 6) {
-        notify("Your password must contain at least 6 characters.", "error");
+        notify(
+            "Your password must contain at least 6 characters.",
+            "error"
+        );
         return;
     }
 
@@ -852,7 +885,10 @@ $("resetPasswordForm")?.addEventListener("submit", async event => {
 
         notify("Password updated successfully.", "success");
 
-        await db.auth.signOut();
+        const { error: signOutError } = await db.auth.signOut();
+
+        if (signOutError) throw signOutError;
+
         currentUser = null;
         profile = null;
         showAuth();
@@ -873,6 +909,10 @@ $("logoutButton")?.addEventListener("click", async () => {
 
         currentUser = null;
         profile = null;
+        posts = [];
+        classrooms = [];
+
+        await stopRealtimeUpdates();
         showAuth();
     } catch (error) {
         notify(friendlyError(error), "error");
@@ -881,7 +921,7 @@ $("logoutButton")?.addEventListener("click", async () => {
 
 /* =========================================================
    POST LECTURE
-   Lecture start time is always NOW.
+   Start time is automatically set to NOW.
 ========================================================= */
 
 $("postForm")?.addEventListener("submit", async event => {
@@ -985,7 +1025,12 @@ $("postForm")?.addEventListener("submit", async event => {
         await refreshDashboard();
     } catch (error) {
         notify(friendlyError(error), "error");
-        await refreshDashboard();
+
+        try {
+            await refreshDashboard();
+        } catch (_) {
+            // The refresh function already reports errors.
+        }
     } finally {
         if (button) button.disabled = false;
     }
@@ -1052,7 +1097,10 @@ $("classroomForm")?.addEventListener("submit", async event => {
         !Number.isFinite(capacity) ||
         capacity <= 0
     ) {
-        notify("Enter a classroom name, building, and valid capacity.", "error");
+        notify(
+            "Enter a classroom name, building, and valid capacity.",
+            "error"
+        );
         return;
     }
 
@@ -1060,6 +1108,11 @@ $("classroomForm")?.addEventListener("submit", async event => {
         let imageUrl = null;
 
         if (imageFile) {
+            if (imageFile.size > 5 * 1024 * 1024) {
+                notify("The classroom photo must be smaller than 5 MB.", "error");
+                return;
+            }
+
             const safeName = imageFile.name.replace(
                 /[^a-zA-Z0-9._-]/g,
                 "_"
@@ -1195,7 +1248,6 @@ function hideManualStartTime() {
 
 /* =========================================================
    SUPABASE REALTIME
-   Keep only one active channel.
 ========================================================= */
 
 function startRealtimeUpdates() {
@@ -1264,7 +1316,7 @@ async function stopRealtimeUpdates() {
     }
 }
 
-/* Update availability locally when lecture durations expire. */
+/* Update room availability when a lecture ends. */
 clockTimer = window.setInterval(() => {
     if (!currentUser || refreshInProgress) return;
 
@@ -1274,7 +1326,7 @@ clockTimer = window.setInterval(() => {
 }, 15000);
 
 /* =========================================================
-   LOGOUT AND AUTHENTICATION STATE CHANGES
+   AUTHENTICATION STATE CHANGES
 ========================================================= */
 
 db.auth.onAuthStateChange((event, session) => {
@@ -1296,11 +1348,6 @@ db.auth.onAuthStateChange((event, session) => {
         return;
     }
 
-    /*
-      Do not reload the dashboard here on SIGNED_IN.
-      The login handler calls enterDashboard() directly.
-      This avoids competing dashboard loads after login.
-    */
     if (event === "INITIAL_SESSION" && authReady && currentUser) {
         window.setTimeout(() => {
             if (currentUser) enterDashboard();
