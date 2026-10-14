@@ -269,6 +269,79 @@ $("loginForm").addEventListener("submit", async event => {
     }
 });
 
+ // FORGOT PASSWORD
+$("forgotPasswordLink").addEventListener("click", async event => {
+    event.preventDefault();
+
+    const email = $("email").value.trim();
+
+    if (!email) {
+        alert("Enter your email address in the login form first.");
+        $("email").focus();
+        return;
+    }
+
+    try {
+        alert("Sending password reset email...");
+
+        const { error } = await db.auth.resetPasswordForEmail(email, {
+            redirectTo: window.location.origin
+        });
+
+        if (error) throw error;
+
+        alert("If the account exists, a password reset email has been requested. Check your inbox.");
+    } catch (error) {
+        console.error("Password reset error:", error);
+        alert("Could not request password reset: " + error.message);
+    }
+});
+
+// SHOW THE NEW PASSWORD FORM AFTER OPENING THE RESET LINK
+db.auth.onAuthStateChange((event) => {
+    if (event === "PASSWORD_RECOVERY") {
+        $("authSection").hidden = true;
+        $("dashboard").hidden = true;
+        $("resetPasswordSection").hidden = false;
+    }
+});
+
+// SAVE THE NEW PASSWORD
+$("resetPasswordForm").addEventListener("submit", async event => {
+    event.preventDefault();
+
+    const newPassword = $("newPassword").value;
+    const message = $("resetMessage");
+
+    if (newPassword.length < 8) {
+        message.textContent = "Your password must be at least 8 characters.";
+        return;
+    }
+
+    try {
+        message.textContent = "Updating password...";
+
+        const { error } = await db.auth.updateUser({
+            password: newPassword
+        });
+
+        if (error) throw error;
+
+        message.textContent = "Password updated successfully. You can now log in.";
+
+        await db.auth.signOut();
+
+        $("resetPasswordForm").reset();
+        $("resetPasswordSection").hidden = true;
+        $("authSection").hidden = false;
+
+    } catch (error) {
+        console.error("Password update error:", error);
+        message.textContent = "Could not update password: " + error.message;
+    }
+});
+
+
 // SIGN UP
 $("signupForm").addEventListener("submit", async event => {
     event.preventDefault();
