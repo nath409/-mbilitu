@@ -1,150 +1,400 @@
+```css
+/* =========================
+   1. GLOBAL STYLES
+========================= */
 
 * {
     box-sizing: border-box;
 }
 
-body {
-    margin: 0;
-    font-family: Arial, sans-serif;
-    background: #f2f5f9;
-    color: #202938;
+:root {
+    --primary: #12366b;
+    --primary-light: #20549a;
+    --accent: #3978d4;
+    --background: #f3f6fb;
+    --white: #ffffff;
+    --text: #202938;
+    --muted: #64748b;
+    --border: #e0e7f0;
+    --success: #187647;
+    --danger: #b42318;
+    --shadow: 0 5px 20px rgba(18, 54, 107, 0.07);
 }
 
+html {
+    scroll-behavior: smooth;
+}
+
+body {
+    margin: 0;
+    font-family: Arial, Helvetica, sans-serif;
+    background: var(--background);
+    color: var(--text);
+    line-height: 1.6;
+}
+
+/* =========================
+   2. HEADER
+========================= */
+
 header {
-    background: #12366b;
+    background: linear-gradient(135deg, #12366b, #20549a);
     color: white;
-    padding: 18px 6%;
+    padding: 20px 6%;
     display: flex;
     justify-content: space-between;
     align-items: center;
     gap: 15px;
+    flex-wrap: wrap;
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.1);
 }
 
 header h2 {
-    font-size: 21px;
+    font-size: 23px;
     margin: 0;
+    font-weight: 700;
+    letter-spacing: 0.3px;
 }
+
+header a {
+    color: white;
+    text-decoration: none;
+}
+
+header a:hover {
+    opacity: 0.85;
+}
+
+/* =========================
+   3. MAIN CONTENT
+========================= */
 
 main {
-    width: min(1000px, 94%);
-    margin: 28px auto;
+    width: min(1120px, 92%);
+    margin: 35px auto;
+    min-height: 65vh;
 }
+
+h1,
+h2,
+h3 {
+    color: var(--primary);
+    line-height: 1.3;
+}
+
+h1 {
+    font-size: clamp(26px, 4vw, 36px);
+}
+
+h2 {
+    font-size: 24px;
+}
+
+h3 {
+    font-size: 19px;
+}
+
+p {
+    margin-top: 8px;
+}
+
+/* =========================
+   4. PANELS AND CARDS
+========================= */
 
 .panel {
-    background: white;
-    padding: 22px;
-    margin-bottom: 22px;
-    border-radius: 10px;
-    box-shadow: 0 2px 9px #0000000c;
+    background: var(--white);
+    padding: 28px;
+    margin-bottom: 25px;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    box-shadow: var(--shadow);
+    transition: box-shadow 0.2s ease;
 }
 
-h1, h2, h3 {
-    color: #12366b;
+.panel:hover {
+    box-shadow: 0 8px 25px rgba(18, 54, 107, 0.10);
 }
+
+/* =========================
+   5. FORMS
+========================= */
 
 label {
     display: block;
-    margin-top: 14px;
-    margin-bottom: 6px;
-    font-weight: bold;
+    margin-top: 17px;
+    margin-bottom: 7px;
+    font-weight: 600;
+    font-size: 14px;
+    color: #344054;
 }
 
-input, select, textarea {
+input,
+select,
+textarea {
     display: block;
     width: 100%;
-    padding: 11px;
+    padding: 13px 14px;
     border: 1px solid #cbd5e1;
-    border-radius: 5px;
+    border-radius: 9px;
     background: white;
+    color: var(--text);
     font: inherit;
+    font-size: 15px;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(57, 120, 212, 0.14);
+}
+
+input::placeholder,
+textarea::placeholder {
+    color: #94a3b8;
 }
 
 textarea {
-    min-height: 85px;
+    min-height: 110px;
     resize: vertical;
 }
 
+/* =========================
+   6. BUTTONS
+========================= */
+
 button {
-    background: #12366b;
+    background: var(--primary);
     color: white;
     border: none;
-    padding: 12px 17px;
-    border-radius: 5px;
+    padding: 12px 19px;
+    border-radius: 9px;
     margin-top: 16px;
     cursor: pointer;
-    font-weight: bold;
+    font: inherit;
+    font-weight: 600;
+    transition: background 0.2s, transform 0.2s,
+                box-shadow 0.2s;
 }
 
 button:hover {
-    background: #20549a;
+    background: var(--primary-light);
+    box-shadow: 0 4px 10px rgba(18, 54, 107, 0.16);
+    transform: translateY(-1px);
+}
+
+button:active {
+    transform: translateY(0);
 }
 
 button:disabled {
-    opacity: .6;
+    opacity: 0.6;
     cursor: wait;
+    transform: none;
+    box-shadow: none;
 }
 
 #logoutBtn {
     margin-top: 0;
-    background: #ffffff;
-    color: #12366b;
+    background: white;
+    color: var(--primary);
+    border: 1px solid #dbe5f2;
 }
 
-.room, .post {
-    border: 1px solid #dbe3ee;
-    border-radius: 8px;
-    padding: 16px;
-    margin: 12px 0;
+#logoutBtn:hover {
+    background: #edf4ff;
+}
+
+/* =========================
+   7. CLASSROOM CARDS
+========================= */
+
+.room,
+.post {
+    background: #ffffff;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    margin: 16px 0;
     overflow-wrap: anywhere;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.room:hover,
+.post:hover {
+    border-color: #b8cbea;
+    box-shadow: 0 4px 14px rgba(18, 54, 107, 0.06);
+}
+
+.room h3,
+.post h3 {
+    margin-top: 0;
 }
 
 .room img {
     display: block;
     width: 100%;
-    max-width: 380px;
-    max-height: 230px;
+    max-width: 420px;
+    max-height: 260px;
     object-fit: cover;
-    border-radius: 6px;
-    margin: 12px 0;
+    border-radius: 10px;
+    margin: 15px 0;
 }
 
+/* =========================
+   8. STATUS LABELS
+========================= */
+
 .status {
-    font-weight: bold;
+    display: inline-block;
+    font-weight: 700;
+    font-size: 14px;
+    padding: 5px 11px;
+    border-radius: 20px;
 }
 
 .empty {
-    color: #187647;
+    color: var(--success);
+    background: #e8f7ee;
 }
 
 .occupied {
-    color: #b42318;
+    color: var(--danger);
+    background: #fff0ef;
 }
 
 .cancelled {
-    color: #b42318;
-    font-weight: bold;
+    display: inline-block;
+    color: var(--danger);
+    background: #fff0ef;
+    font-weight: 700;
+    padding: 5px 11px;
+    border-radius: 7px;
 }
+
+/* =========================
+   9. LINKS
+========================= */
+
+a {
+    color: var(--accent);
+}
+
+a:hover {
+    color: var(--primary);
+}
+
+/* =========================
+   10. FOOTER
+========================= */
 
 footer {
     text-align: center;
-    color: #596579;
-    padding: 20px;
+    color: var(--muted);
+    padding: 25px 15px;
+    margin-top: 40px;
+    border-top: 1px solid var(--border);
+    font-size: 14px;
 }
+
+/* =========================
+   11. ACCESSIBILITY
+========================= */
 
 [hidden] {
     display: none !important;
 }
 
-@media (max-width: 600px) {
+button:focus-visible,
+a:focus-visible {
+    outline: 3px solid #78a9f5;
+    outline-offset: 3px;
+}
+
+/* =========================
+   12. TABLETS AND PHONES
+========================= */
+
+@media (max-width: 768px) {
     header {
-        padding: 15px;
+        padding: 17px 4%;
     }
 
     header h2 {
-        font-size: 17px;
+        font-size: 20px;
+    }
+
+    main {
+        width: 94%;
+        margin: 22px auto;
     }
 
     .panel {
-        padding: 16px;
+        padding: 21px;
+        border-radius: 13px;
+    }
+
+    h2 {
+        font-size: 21px;
     }
 }
+
+@media (max-width: 480px) {
+    header {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    header h2 {
+        font-size: 19px;
+    }
+
+    main {
+        width: 94%;
+        margin: 17px auto;
+    }
+
+    .panel {
+        padding: 17px;
+        margin-bottom: 18px;
+    }
+
+    input,
+    select,
+    textarea {
+        padding: 12px;
+        font-size: 16px;
+    }
+
+    button {
+        max-width: 100%;
+    }
+
+    .room,
+    .post {
+        padding: 15px;
+    }
+
+    footer {
+        padding: 20px 12px;
+    }
+}
+
+/* =========================
+   13. REDUCED MOTION
+========================= */
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        scroll-behavior: auto !important;
+        transition-duration: 0.01ms !important;
+        animation-duration: 0.01ms !important;
+    }
+}
+```
