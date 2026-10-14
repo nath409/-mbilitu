@@ -15,9 +15,11 @@ let programs = [];
 let classrooms = [];
 let posts = [];
 
-let refreshInProgress = false;
-let refreshTimer = null;
 let realtimeChannel = null;
+let refreshTimer = null;
+let clockTimer = null;
+let refreshInProgress = false;
+let dashboardLoading = false;
 let authReady = false;
 
 const $ = id => document.getElementById(id);
@@ -27,14 +29,19 @@ const isAdmin = () => profile?.role === "admin";
 const canPost = () =>
     ["admin", "class_rep", "lecturer"].includes(profile?.role);
 
-const escapeHTML = value =>
-    String(value ?? "").replace(/[&<>"']/g, character => ({
+/* =========================================================
+   MESSAGES AND HELPERS
+========================================================= */
+
+function escapeHTML(value) {
+    return String(value ?? "").replace(/[&<>"']/g, character => ({
         "&": "&amp;",
         "<": "&lt;",
         ">": "&gt;",
         '"': "&quot;",
         "'": "&#039;"
     })[character]);
+}
 
 function notify(message, type = "info") {
     const region = $("toastRegion");
@@ -47,7 +54,10 @@ function notify(message, type = "info") {
         region.appendChild(toast);
 
         window.setTimeout(() => toast.remove(), 5000);
-    } else if (messageBox) {
+        return;
+    }
+
+    if (messageBox) {
         messageBox.textContent = message;
         messageBox.className = `message ${type}`;
         messageBox.hidden = false;
@@ -55,9 +65,10 @@ function notify(message, type = "info") {
         window.setTimeout(() => {
             messageBox.hidden = true;
         }, 5000);
-    } else {
-        alert(message);
+        return;
     }
+
+    alert(message);
 }
 
 function friendlyError(error) {
@@ -69,7 +80,7 @@ function friendlyError(error) {
             "no_overlapping_classroom_lectures"
         )
     ) {
-        return "This classroom has a conflicting lecture. Please choose another available classroom.";
+        return "This classroom has a conflicting lecture. Please choose another classroom.";
     }
 
     if (error.code === "23505") {
@@ -80,21 +91,19 @@ function friendlyError(error) {
         return "You do not have permission to perform this action.";
     }
 
-    if (
-        error.message?.toLowerCase().includes("invalid login")
-    ) {
+    const message = String(error.message || "").toLowerCase();
+
+    if (message.includes("invalid login")) {
         return "Incorrect email or password.";
     }
 
-    if (
-        error.message?.toLowerCase().includes("email not confirmed")
-    ) {
+    if (message.includes("email not confirmed")) {
         return "Please confirm your email before signing in.";
     }
 
     if (
-        error.message?.toLowerCase().includes("row-level security") ||
-        error.message?.toLowerCase().includes("permission denied")
+        message.includes("row-level security") ||
+        message.includes("permission denied")
     ) {
         return "Permission denied. Please check your Supabase access policies.";
     }
@@ -102,13 +111,21 @@ function friendlyError(error) {
     return error.message || "An unexpected error occurred.";
 }
 
+/*
+  Important login fix:
+  Set both the hidden property and display style so that a CSS
+  rule does not accidentally keep the login page visible.
+*/
 function setVisible(element, visible) {
-    if (element) element.hidden = !visible;
-}
+    if (!element) return;
 
-/* =========================================================
-   AUTHENTICATION SCREENS
-========================================================= */
+    element.hidden = !visible;
+    element.style.setProperty(
+        "display",
+        visible ? "block" : "none",
+        "important"
+    );
+}
 
 function showAuth() {
     setVisible($("authSection"), true);
@@ -126,7 +143,6 @@ function showDashboard() {
     setVisible($("authSection"), false);
     setVisible($("resetPasswordSection"), false);
     setVisible($("dashboard"), true);
-
     showPage("overview");
 }
 
@@ -153,7 +169,7 @@ async function loadPrograms() {
     [$("signupProgram"), $("targetProgram")].forEach(select => {
         if (!select) return;
 
-        const previousValue = select.value;
+        const oldValue = select.value;
 
         select.replaceChildren(
             new Option("Select a programme", "")
@@ -164,16 +180,16 @@ async function loadPrograms() {
         });
 
         if (
-            previousValue &&
-            programs.some(p => String(p.id) === previousValue)
+            oldValue &&
+            programs.some(program => String(program.id) === oldValue)
         ) {
-            select.value = previousValue;
+            select.value = oldValue;
         }
     });
 }
 
 /* =========================================================
-   LOAD PROFILE
+   LOAD USER PROFILE
 ========================================================= */
 
 async function loadProfile() {
@@ -192,14 +208,14 @@ async function loadProfile() {
 
     if (!data) {
         throw new Error(
-            "Your user profile was not found. Please contact the administrator."
+            "Your user profile could not be found. Please contact the administrator."
         );
     }
 
     profile = data;
 
     const program = programs.find(
-        p => String(p.id) === String(profile.program_id)
+        item => String(item.id) === String(profile.program_id)
     );
 
     if ($("headerUser")) {
@@ -271,7 +287,7 @@ async function loadClassrooms() {
 }
 
 /* =========================================================
-   LOAD ANNOUNCEMENTS
+   LOAD LECTURE POSTS
 ========================================================= */
 
 async function loadPosts() {
@@ -314,18 +330,25 @@ async function loadPosts() {
 }
 
 /* =========================================================
-   LECTURE STATUS
+   LECTURE STATUS AND AVAILABILITY
 ========================================================= */
+
+function getPostEndTime(post) {
+    if (post.lecture_end_time) {
+        return new Date(post.lecture_end_time);
+    }
+
+    return new Date(
+        new Date(post.start_time).getTime() +
+        Number(post.duration_minutes) * 60000
+    );
+}
 
 function getPostStatus(post) {
     if (post.cancelled) return "cancelled";
 
     const start = new Date(post.start_time).getTime();
-
-    const end = post.lecture_end_time
-        ? new Date(post.lecture_end_time).getTime()
-        : start + Number(post.duration_minutes) * 60000;
-
+    const end = getPostEndTime(post).getTime();
     const now = Date.now();
 
     if (!Number.isFinite(start) || !Number.isFinite(end)) {
@@ -349,17 +372,6 @@ function getRoomStatus(roomId) {
     return roomIsOccupied(roomId) ? "Occupied" : "Available";
 }
 
-function getPostEndTime(post) {
-    if (post.lecture_end_time) {
-        return new Date(post.lecture_end_time);
-    }
-
-    return new Date(
-        new Date(post.start_time).getTime() +
-        Number(post.duration_minutes) * 60000
-    );
-}
-
 function formatDateTime(value) {
     if (!value) return "Not available";
 
@@ -378,7 +390,7 @@ function renderPostRoomDropdown() {
     const select = $("postRoom");
     if (!select) return;
 
-    const previousValue = select.value;
+    const oldValue = select.value;
 
     const availableRooms = classrooms.filter(
         room => !roomIsOccupied(room.id)
@@ -403,17 +415,17 @@ function renderPostRoomDropdown() {
     });
 
     if (
-        previousValue &&
+        oldValue &&
         availableRooms.some(
-            room => String(room.id) === previousValue
+            room => String(room.id) === oldValue
         )
     ) {
-        select.value = previousValue;
+        select.value = oldValue;
     }
 }
 
 /* =========================================================
-   CLASSROOM DIRECTORY
+   RENDER CLASSROOM DIRECTORY
 ========================================================= */
 
 function renderRooms() {
@@ -426,7 +438,7 @@ function renderRooms() {
     const search = ($("roomSearch")?.value || "").toLowerCase();
     const filter = $("roomStatusFilter")?.value || "all";
 
-    const filtered = classrooms.filter(room => {
+    const filteredRooms = classrooms.filter(room => {
         const text =
             `${room.name} ${room.building || ""}`.toLowerCase();
 
@@ -437,13 +449,13 @@ function renderRooms() {
             (filter === "all" || status === filter.toLowerCase());
     });
 
-    if (!filtered.length) {
+    if (!filteredRooms.length) {
         container.innerHTML =
             `<p class="empty-state">No classrooms match your search.</p>`;
         return;
     }
 
-    container.innerHTML = filtered.map(room => {
+    container.innerHTML = filteredRooms.map(room => {
         const occupied = roomIsOccupied(room.id);
 
         const image = room.image_url
@@ -469,7 +481,7 @@ function renderRooms() {
 }
 
 /* =========================================================
-   ANNOUNCEMENTS
+   RENDER ANNOUNCEMENTS
 ========================================================= */
 
 function renderPosts() {
@@ -479,7 +491,7 @@ function renderPosts() {
     const search = ($("postSearch")?.value || "").toLowerCase();
     const filter = $("postStatusFilter")?.value || "all";
 
-    const filtered = posts.filter(post => {
+    const filteredPosts = posts.filter(post => {
         const text = `
             ${post.title || ""}
             ${post.details || ""}
@@ -493,13 +505,13 @@ function renderPosts() {
             (filter === "all" || status === filter);
     });
 
-    if (!filtered.length) {
+    if (!filteredPosts.length) {
         container.innerHTML =
             `<p class="empty-state">No announcements found.</p>`;
         return;
     }
 
-    container.innerHTML = filtered.map(post => {
+    container.innerHTML = filteredPosts.map(post => {
         const status = getPostStatus(post);
         const room = post.classrooms || {};
         const program = post.programs || {};
@@ -545,7 +557,7 @@ function renderPosts() {
 }
 
 /* =========================================================
-   OVERVIEW
+   RENDER DASHBOARD OVERVIEW
 ========================================================= */
 
 function renderOverview() {
@@ -597,7 +609,7 @@ function renderOverview() {
 }
 
 /* =========================================================
-   DASHBOARD NAVIGATION
+   NAVIGATION
 ========================================================= */
 
 function showPage(pageName) {
@@ -606,7 +618,9 @@ function showPage(pageName) {
 
     const target = $(`${pageName}Page`);
 
-    if (target) target.classList.add("active");
+    if (target) {
+        target.classList.add("active");
+    }
 
     document.querySelectorAll(".nav-item[data-page]")
         .forEach(button => {
@@ -620,7 +634,7 @@ function showPage(pageName) {
 window.showPage = showPage;
 
 /* =========================================================
-   DASHBOARD REFRESH
+   REFRESH DASHBOARD
 ========================================================= */
 
 async function refreshDashboard() {
@@ -640,8 +654,42 @@ async function refreshDashboard() {
     } catch (error) {
         console.error("Dashboard refresh error:", error);
         notify(friendlyError(error), "error");
+        throw error;
     } finally {
         refreshInProgress = false;
+    }
+}
+
+/* =========================================================
+   OPEN DASHBOARD AFTER LOGIN
+========================================================= */
+
+async function enterDashboard() {
+    if (!currentUser || dashboardLoading) return;
+
+    dashboardLoading = true;
+
+    try {
+        await loadPrograms();
+        await loadProfile();
+        await loadClassrooms();
+        await loadPosts();
+
+        /*
+          Hide the login page explicitly and show the dashboard.
+        */
+        showDashboard();
+
+        renderRooms();
+        renderPosts();
+        renderOverview();
+
+        startRealtimeUpdates();
+    } catch (error) {
+        console.error("Dashboard loading error:", error);
+        notify(friendlyError(error), "error");
+    } finally {
+        dashboardLoading = false;
     }
 }
 
@@ -664,15 +712,26 @@ $("loginForm")?.addEventListener("submit", async event => {
     if (button) button.disabled = true;
 
     try {
-        const { error } = await db.auth.signInWithPassword({
+        const { data, error } = await db.auth.signInWithPassword({
             email,
             password
         });
 
         if (error) throw error;
 
-        notify("Login successful.", "success");
+        currentUser = data.user || data.session?.user || null;
+
+        if (!currentUser) {
+            throw new Error("Login succeeded, but the user session was not returned.");
+        }
+
+        await enterDashboard();
+
+        if ($("dashboard") && !$("dashboard").hidden) {
+            notify("Login successful.", "success");
+        }
     } catch (error) {
+        console.error("Login error:", error);
         notify(friendlyError(error), "error");
     } finally {
         if (button) button.disabled = false;
@@ -721,10 +780,13 @@ $("signupForm")?.addEventListener("submit", async event => {
 
             if (profileError) throw profileError;
 
+            currentUser = data.user;
+            await enterDashboard();
+
             notify("Account created successfully.", "success");
         } else {
             notify(
-                "Account created. Check your email to confirm your account, then sign in.",
+                "Account created. Confirm your email before signing in.",
                 "success"
             );
         }
@@ -755,7 +817,7 @@ $("forgotPasswordLink")?.addEventListener("click", async event => {
         if (error) throw error;
 
         notify(
-            "If an account exists for that email, a reset link will be sent.",
+            "If an account exists for that email, a password reset link will be sent.",
             "success"
         );
     } catch (error) {
@@ -771,14 +833,14 @@ $("resetPasswordForm")?.addEventListener("submit", async event => {
     event.preventDefault();
 
     const password = $("newPassword")?.value;
-    const confirmPassword = $("confirmPassword")?.value;
+    const confirmation = $("confirmPassword")?.value;
 
     if (!password || password.length < 6) {
         notify("Your password must contain at least 6 characters.", "error");
         return;
     }
 
-    if (password !== confirmPassword) {
+    if (password !== confirmation) {
         notify("The passwords do not match.", "error");
         return;
     }
@@ -791,6 +853,8 @@ $("resetPasswordForm")?.addEventListener("submit", async event => {
         notify("Password updated successfully.", "success");
 
         await db.auth.signOut();
+        currentUser = null;
+        profile = null;
         showAuth();
     } catch (error) {
         notify(friendlyError(error), "error");
@@ -802,16 +866,22 @@ $("resetPasswordForm")?.addEventListener("submit", async event => {
 ========================================================= */
 
 $("logoutButton")?.addEventListener("click", async () => {
-    const { error } = await db.auth.signOut();
+    try {
+        const { error } = await db.auth.signOut();
 
-    if (error) {
+        if (error) throw error;
+
+        currentUser = null;
+        profile = null;
+        showAuth();
+    } catch (error) {
         notify(friendlyError(error), "error");
     }
 });
 
 /* =========================================================
    POST LECTURE
-   The start time is automatically set to the current time.
+   Lecture start time is always NOW.
 ========================================================= */
 
 $("postForm")?.addEventListener("submit", async event => {
@@ -845,21 +915,13 @@ $("postForm")?.addEventListener("submit", async event => {
         return;
     }
 
-    const room = classrooms.find(
-        item => String(item.id) === String(roomId)
-    );
-
-    if (!room) {
+    if (!classrooms.some(room => String(room.id) === String(roomId))) {
         notify("Please select a valid classroom.", "error");
         return;
     }
 
     if (roomIsOccupied(roomId)) {
-        notify(
-            "This classroom is now occupied. Please choose another.",
-            "error"
-        );
-
+        notify("That classroom is already occupied.", "error");
         await refreshDashboard();
         return;
     }
@@ -868,7 +930,7 @@ $("postForm")?.addEventListener("submit", async event => {
     const startMs = start.getTime();
     const endMs = startMs + duration * 60000;
 
-    const hasOverlap = posts.some(post => {
+    const overlap = posts.some(post => {
         if (
             post.cancelled ||
             String(post.classroom_id) !== String(roomId)
@@ -889,12 +951,11 @@ $("postForm")?.addEventListener("submit", async event => {
         return startMs < existingEnd && endMs > existingStart;
     });
 
-    if (hasOverlap) {
+    if (overlap) {
         notify(
             "This classroom has a conflicting lecture. Choose another classroom.",
             "error"
         );
-
         await refreshDashboard();
         return;
     }
@@ -920,11 +981,7 @@ $("postForm")?.addEventListener("submit", async event => {
 
         $("postForm").reset();
 
-        notify(
-            "Lecture published. The classroom is now marked as occupied.",
-            "success"
-        );
-
+        notify("Lecture published successfully.", "success");
         await refreshDashboard();
     } catch (error) {
         notify(friendlyError(error), "error");
@@ -1059,14 +1116,14 @@ $("roleForm")?.addEventListener("submit", async event => {
     const role = $("targetRole")?.value;
     const programId = $("targetProgram")?.value || null;
 
-    const allowedRoles = [
+    const validRoles = [
         "student",
         "class_rep",
         "lecturer",
         "admin"
     ];
 
-    if (!userId || !allowedRoles.includes(role)) {
+    if (!userId || !validRoles.includes(role)) {
         notify("Enter a valid user ID and role.", "error");
         return;
     }
@@ -1085,14 +1142,13 @@ $("roleForm")?.addEventListener("submit", async event => {
 
         if (!data?.length) {
             notify(
-                "No profile was updated. Check the user ID and database permissions.",
+                "No profile was updated. Check the user ID and permissions.",
                 "error"
             );
             return;
         }
 
         $("roleForm").reset();
-
         notify("User role and programme updated.", "success");
     } catch (error) {
         notify(friendlyError(error), "error");
@@ -1109,12 +1165,16 @@ $("postSearch")?.addEventListener("input", renderPosts);
 $("postStatusFilter")?.addEventListener("change", renderPosts);
 
 $("refreshButton")?.addEventListener("click", async () => {
-    await refreshDashboard();
-    notify("Dashboard refreshed.", "success");
+    try {
+        await refreshDashboard();
+        notify("Dashboard refreshed.", "success");
+    } catch (_) {
+        // The refresh function already reports the error.
+    }
 });
 
 /* =========================================================
-   HIDE OLD MANUAL START-TIME FIELD
+   HIDE MANUAL START-TIME FIELD
 ========================================================= */
 
 function hideManualStartTime() {
@@ -1124,20 +1184,22 @@ function hideManualStartTime() {
     if (input) {
         input.required = false;
         input.hidden = true;
+        input.style.display = "none";
     }
 
-    if (label) label.hidden = true;
+    if (label) {
+        label.hidden = true;
+        label.style.display = "none";
+    }
 }
 
 /* =========================================================
-   REALTIME CONNECTION
-   This function creates only ONE channel.
+   SUPABASE REALTIME
+   Keep only one active channel.
 ========================================================= */
 
 function startRealtimeUpdates() {
-    if (realtimeChannel) {
-        return;
-    }
+    if (realtimeChannel) return;
 
     realtimeChannel = db
         .channel("classroom-live-updates")
@@ -1148,7 +1210,7 @@ function startRealtimeUpdates() {
                 schema: "public",
                 table: "lecture_posts"
             },
-            () => scheduleLiveRefresh()
+            scheduleLiveRefresh
         )
         .on(
             "postgres_changes",
@@ -1157,7 +1219,7 @@ function startRealtimeUpdates() {
                 schema: "public",
                 table: "classrooms"
             },
-            () => scheduleLiveRefresh()
+            scheduleLiveRefresh
         )
         .subscribe(status => {
             console.log("Classroom Realtime status:", status);
@@ -1167,7 +1229,7 @@ function startRealtimeUpdates() {
                 status === "TIMED_OUT"
             ) {
                 console.error(
-                    "Realtime connection problem. Check your connection and Supabase Realtime settings."
+                    "Realtime connection issue. Check Supabase Realtime settings."
                 );
             }
         });
@@ -1180,21 +1242,30 @@ function scheduleLiveRefresh() {
 
     refreshTimer = window.setTimeout(async () => {
         refreshTimer = null;
-        await refreshLiveStatus();
+
+        try {
+            await refreshDashboard();
+        } catch (_) {
+            // The refresh function already reports the error.
+        }
     }, 500);
 }
 
-async function refreshLiveStatus() {
-    if (!currentUser || refreshInProgress) return;
+async function stopRealtimeUpdates() {
+    if (!realtimeChannel) return;
 
-    await refreshDashboard();
+    const oldChannel = realtimeChannel;
+    realtimeChannel = null;
+
+    try {
+        await db.removeChannel(oldChannel);
+    } catch (error) {
+        console.error("Could not close Realtime channel:", error);
+    }
 }
 
-/* =========================================================
-   AUTOMATIC CLASSROOM STATUS UPDATES
-========================================================= */
-
-window.setInterval(() => {
+/* Update availability locally when lecture durations expire. */
+clockTimer = window.setInterval(() => {
     if (!currentUser || refreshInProgress) return;
 
     renderRooms();
@@ -1203,7 +1274,42 @@ window.setInterval(() => {
 }, 15000);
 
 /* =========================================================
-   APPLICATION STARTUP
+   LOGOUT AND AUTHENTICATION STATE CHANGES
+========================================================= */
+
+db.auth.onAuthStateChange((event, session) => {
+    currentUser = session?.user || null;
+
+    if (event === "PASSWORD_RECOVERY") {
+        showResetPassword();
+        return;
+    }
+
+    if (event === "SIGNED_OUT") {
+        currentUser = null;
+        profile = null;
+        posts = [];
+        classrooms = [];
+
+        stopRealtimeUpdates();
+        showAuth();
+        return;
+    }
+
+    /*
+      Do not reload the dashboard here on SIGNED_IN.
+      The login handler calls enterDashboard() directly.
+      This avoids competing dashboard loads after login.
+    */
+    if (event === "INITIAL_SESSION" && authReady && currentUser) {
+        window.setTimeout(() => {
+            if (currentUser) enterDashboard();
+        }, 0);
+    }
+});
+
+/* =========================================================
+   START APPLICATION
 ========================================================= */
 
 async function startApp() {
@@ -1217,78 +1323,22 @@ async function startApp() {
 
         currentUser = data.session?.user || null;
 
-        await loadPrograms();
-
-        if (currentUser) {
-            await refreshDashboard();
-            showDashboard();
-            startRealtimeUpdates();
-        } else {
+        if (!currentUser) {
+            await loadPrograms();
             showAuth();
+            authReady = true;
+            return;
         }
 
+        await enterDashboard();
         authReady = true;
     } catch (error) {
         console.error("Application startup error:", error);
         showAuth();
         notify(friendlyError(error), "error");
+        authReady = true;
     }
 }
 
-/* =========================================================
-   AUTH STATE CHANGES
-========================================================= */
-
-db.auth.onAuthStateChange((event, session) => {
-    currentUser = session?.user || null;
-
-    if (event === "PASSWORD_RECOVERY") {
-        showResetPassword();
-        return;
-    }
-
-    if (event === "SIGNED_OUT") {
-        profile = null;
-        posts = [];
-        classrooms = [];
-
-        if (realtimeChannel) {
-            const oldChannel = realtimeChannel;
-            realtimeChannel = null;
-            db.removeChannel(oldChannel);
-        }
-
-        showAuth();
-        return;
-    }
-
-    if (
-        currentUser &&
-        ["SIGNED_IN", "INITIAL_SESSION", "USER_UPDATED"].includes(event)
-    ) {
-        /*
-          Wait until startup has finished to avoid duplicate
-          initial loads and duplicate Realtime subscriptions.
-        */
-        if (!authReady && event === "INITIAL_SESSION") {
-            return;
-        }
-
-        window.setTimeout(async () => {
-            if (!currentUser) return;
-
-            try {
-                await refreshDashboard();
-                showDashboard();
-                startRealtimeUpdates();
-            } catch (error) {
-                console.error("Authentication update error:", error);
-                notify(friendlyError(error), "error");
-            }
-        }, 0);
-    }
-});
-
-/* Run the application */
 startApp();
 
