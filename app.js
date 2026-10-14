@@ -1,13 +1,15 @@
 
+/* =========================================================
+   MUKUBA UNIVERSITY CLASSROOM MANAGEMENT SYSTEM
+   HTML + JavaScript + Supabase
+   ========================================================= */
+
 const SUPABASE_URL = "https://mbieizajeifupzuokefx.supabase.co";
 const SUPABASE_KEY = "sb_publishable_0ns5_TamqKpwft8NV1rkKw_MebMI8d0";
 
-const db = window.supabase.createClient(
-    SUPABASE_URL,
-    SUPABASE_KEY
-);
+const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-const $ = id => document.getElementById(id);
+const $ = (id) => document.getElementById(id);
 
 let currentUser = null;
 let profile = null;
@@ -15,17 +17,35 @@ let programs = [];
 let rooms = [];
 let posts = [];
 
-function notify(message) {
-    $("message").textContent = message;
+/* =========================================================
+   GENERAL HELPERS
+   ========================================================= */
+
+function notify(message, type = "info") {
+    const messageBox = $("message");
+
+    if (messageBox) {
+        messageBox.textContent = message;
+        messageBox.classList.remove("hidden");
+        messageBox.dataset.type = type;
+    }
+
+    const toastRegion = $("toastRegion");
+
+    if (toastRegion) {
+        toastRegion.textContent = message;
+        toastRegion.dataset.type = type;
+    }
 }
 
-// Convert database errors into messages ordinary users can understand.
 function friendlyError(error) {
+    console.error(error);
+
     if (
         error?.code === "23P01" ||
         error?.message?.includes("no_overlapping_classroom_lectures")
     ) {
-        return "This classroom is already booked for part of that time. Please choose another classroom or a different start time.";
+        return "This classroom is already booked during part of that time. Please choose another classroom or a different start time.";
     }
 
     if (error?.code === "23505") {
@@ -33,32 +53,127 @@ function friendlyError(error) {
     }
 
     if (error?.code === "23503") {
-        return "Some selected information is no longer available. Please refresh the page and try again.";
+        return "Some selected information is unavailable. Refresh the page and try again.";
+    }
+
+    if (error?.code === "42501" || error?.code === "PGRST301") {
+        return "You do not have permission to perform this action. Check your account role and Supabase security policies.";
     }
 
     if (
         error?.message?.includes("Failed to fetch") ||
         error?.message?.includes("NetworkError")
     ) {
-        return "Unable to connect. Please check your internet connection and try again.";
+        return "Unable to connect to the server. Check your internet connection and try again.";
+    }
+
+    if (error?.message?.includes("Invalid login credentials")) {
+        return "Incorrect email or password. Please try again.";
+    }
+
+    if (error?.message?.includes("Email not confirmed")) {
+        return "Please confirm your email address before signing in.";
     }
 
     return error?.message || "Something went wrong. Please try again.";
 }
 
 function escapeHTML(value = "") {
-    return String(value).replace(/[&<>"']/g, char => ({
+    return String(value).replace(/[&<>"']/g, character => ({
         "&": "&amp;",
         "<": "&lt;",
         ">": "&gt;",
         '"': "&quot;",
         "'": "&#39;"
-    })[char]);
+    })[character]);
 }
 
-function dateText(value) {
-    return new Date(value).toLocaleString();
+function formatDate(value) {
+    if (!value) return "Not specified";
+
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) return "Not specified";
+
+    return date.toLocaleString();
 }
+
+function isCancelled(post) {
+    return post.cancelled === true;
+}
+
+function getPostEnd(post) {
+    if (post.lecture_end_time) {
+        return new Date(post.lecture_end_time).getTime();
+    }
+
+    return new Date(post.start_time).getTime()
+        + Number(post.duration_minutes) * 60000;
+}
+
+function getPostStatus(post) {
+    if (isCancelled(post)) return "cancelled";
+
+    const now = Date.now();
+    const start = new Date(post.start_time).getTime();
+    const end = getPostEnd(post);
+
+    if (now < start) return "upcoming";
+    if (now >= start && now < end) return "active";
+
+    return "past";
+}
+
+function programName(programId) {
+    const program = programs.find(
+        item => String(item.id) === String(programId)
+    );
+
+    return program?.name || "Programme not assigned";
+}
+
+function showPage(pageId) {
+    const pages = document.querySelectorAll(".page");
+
+    pages.forEach(page => {
+        page.classList.toggle("active", page.id === pageId);
+    });
+
+    document.querySelectorAll(".nav-item").forEach(button => {
+        button.classList.toggle(
+            "active",
+            button.dataset.page === pageId
+        );
+    });
+
+    window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function hide(element) {
+    if (element) element.classList.add("hidden");
+}
+
+function reveal(element) {
+    if (element) element.classList.remove("hidden");
+}
+
+function setOptions(selectId, items, placeholder, valueField = "id") {
+    const select = $(selectId);
+    if (!select) return;
+
+    select.replaceChildren(new Option(placeholder, ""));
+
+    items.forEach(item => {
+        select.add(new Option(
+            item.name,
+            item[valueField]
+        ));
+    });
+}
+
+/* =========================================================
+   AUTHENTICATION AND PASSWORD RESET
+   ========================================================= */
 
 async function loadPrograms() {
     const { data, error } = await db
@@ -70,17 +185,17 @@ async function loadPrograms() {
 
     programs = data || [];
 
-    ["signupProgram", "targetProgram"].forEach(id => {
-        const select = $(id);
+    setOptions(
+        "signupProgram",
+        programs,
+        "Select your programme"
+    );
 
-        select.innerHTML = id === "targetProgram"
-            ? '<option value="">No programme</option>'
-            : '<option value="">Choose your programme</option>';
-
-        programs.forEach(program => {
-            select.add(new Option(program.name, program.id));
-        });
-    });
+    setOptions(
+        "targetProgram",
+        programs,
+        "No programme"
+    );
 }
 
 async function loadProfile() {
@@ -88,16 +203,358 @@ async function loadProfile() {
         .from("profiles")
         .select("id,full_name,role,program_id")
         .eq("id", currentUser.id)
-        .single();
+        .maybeSingle();
 
     if (error) throw error;
 
-    profile = data;
-
-    if (!profile) {
-        throw new Error("Your user profile was not found.");
+    if (!data) {
+        throw new Error(
+            "Your user profile was not found. Ask an administrator to check the profiles table."
+        );
     }
+
+    profile = data;
 }
+
+async function signOut() {
+    const { error } = await db.auth.signOut();
+
+    if (error) throw error;
+
+    currentUser = null;
+    profile = null;
+    rooms = [];
+    posts = [];
+
+    hide($("dashboard"));
+    hide($("resetPasswordSection"));
+    hide($("logoutButton"));
+    reveal($("authSection"));
+
+    if ($("headerUser")) {
+        $("headerUser").textContent = "Welcome";
+    }
+
+    notify("You have logged out successfully.");
+}
+
+const loginForm = $("loginForm");
+
+if (loginForm) {
+    loginForm.addEventListener("submit", async event => {
+        event.preventDefault();
+
+        try {
+            notify("Signing in...");
+
+            const email = $("loginEmail").value.trim();
+            const password = $("loginPassword").value;
+
+            if (!email || !password) {
+                notify("Enter your email address and password.");
+                return;
+            }
+
+            const { data, error } = await db.auth.signInWithPassword({
+                email,
+                password
+            });
+
+            if (error) throw error;
+
+            currentUser = data.user;
+
+            await loadPrograms();
+            await showDashboard();
+
+            notify("Welcome back!");
+        } catch (error) {
+            notify("Login failed: " + friendlyError(error), "error");
+        }
+    });
+}
+
+/* Student registration */
+
+const signupForm = $("signupForm");
+
+if (signupForm) {
+    signupForm.addEventListener("submit", async event => {
+        event.preventDefault();
+
+        try {
+            notify("Creating your account...");
+
+            const fullName = $("signupName").value.trim();
+            const email = $("signupEmail").value.trim();
+            const password = $("signupPassword").value;
+            const programId = $("signupProgram").value;
+
+            if (!fullName || !email || !password) {
+                notify("Please complete all required fields.");
+                return;
+            }
+
+            if (password.length < 6) {
+                notify("Your password must contain at least 6 characters.");
+                return;
+            }
+
+            const { data, error } = await db.auth.signUp({
+                email,
+                password,
+                options: {
+                    data: {
+                        full_name: fullName
+                    }
+                }
+            });
+
+            if (error) throw error;
+
+            if (!data.session) {
+                notify(
+                    "Account created. Check your email for the confirmation link. After confirming, sign in and ask an administrator to assign your programme if needed."
+                );
+                signupForm.reset();
+                return;
+            }
+
+            currentUser = data.user;
+
+            // Update the programme only if the profile exists
+            // and the current account has permission to update it.
+            if (programId) {
+                const { error: updateError } = await db
+                    .from("profiles")
+                    .update({ program_id: programId })
+                    .eq("id", currentUser.id);
+
+                if (updateError) {
+                    console.warn(
+                        "Programme assignment needs attention:",
+                        updateError
+                    );
+                }
+            }
+
+            await loadPrograms();
+            await showDashboard();
+
+            notify("Your account has been created successfully.");
+        } catch (error) {
+            notify("Registration failed: " + friendlyError(error), "error");
+        }
+    });
+}
+
+/* Forgot password */
+
+const forgotPasswordLink = $("forgotPasswordLink");
+
+if (forgotPasswordLink) {
+    forgotPasswordLink.addEventListener("click", async event => {
+        event.preventDefault();
+
+        const email = $("loginEmail").value.trim();
+
+        if (!email) {
+            notify(
+                "Enter your email address in the sign-in form first."
+            );
+            $("loginEmail").focus();
+            return;
+        }
+
+        try {
+            notify("Sending your password-reset link...");
+
+            const redirectTo =
+                window.location.origin + window.location.pathname;
+
+            const { error } = await db.auth.resetPasswordForEmail(email, {
+                redirectTo
+            });
+
+            if (error) throw error;
+
+            notify(
+                "If an account exists for that email, a password-reset link will be sent. Check your inbox and spam folder."
+            );
+        } catch (error) {
+            notify(
+                "Could not send the reset link: " + friendlyError(error),
+                "error"
+            );
+        }
+    });
+}
+
+/* Save a new password */
+
+const resetPasswordForm = $("resetPasswordForm");
+
+if (resetPasswordForm) {
+    resetPasswordForm.addEventListener("submit", async event => {
+        event.preventDefault();
+
+        try {
+            const password = $("newPassword").value;
+            const confirmation = $("confirmPassword").value;
+
+            if (password.length < 6) {
+                notify("Your new password must contain at least 6 characters.");
+                return;
+            }
+
+            if (password !== confirmation) {
+                notify("The two passwords do not match.");
+                return;
+            }
+
+            notify("Updating your password...");
+
+            const { error } = await db.auth.updateUser({ password });
+
+            if (error) throw error;
+
+            resetPasswordForm.reset();
+            hide($("resetPasswordSection"));
+            reveal($("authSection"));
+
+            notify(
+                "Your password has been changed. You can now sign in with your new password."
+            );
+
+            await db.auth.signOut();
+        } catch (error) {
+            notify(
+                "Password update failed: " + friendlyError(error),
+                "error"
+            );
+        }
+    });
+}
+
+/* =========================================================
+   DASHBOARD AND PROFILE
+   ========================================================= */
+
+async function showDashboard() {
+    if (!currentUser) return;
+
+    await loadProfile();
+
+    hide($("authSection"));
+    hide($("resetPasswordSection"));
+    reveal($("dashboard"));
+    reveal($("logoutButton"));
+
+    const fullName = profile.full_name || currentUser.email || "User";
+    const role = profile.role || "student";
+    const programme = programName(profile.program_id);
+
+    if ($("headerUser")) {
+        $("headerUser").textContent = fullName;
+    }
+
+    if ($("welcomeName")) {
+        $("welcomeName").textContent = "Welcome, " + fullName;
+    }
+
+    if ($("welcomeInfo")) {
+        $("welcomeInfo").textContent =
+            "Role: " + role.replaceAll("_", " ")
+            + " | Programme: " + programme;
+    }
+
+    if ($("profileName")) {
+        $("profileName").textContent = fullName;
+    }
+
+    if ($("profileEmail")) {
+        $("profileEmail").textContent = currentUser.email || "";
+    }
+
+    if ($("profileRole")) {
+        $("profileRole").textContent = role.replaceAll("_", " ");
+    }
+
+    if ($("profileProgram")) {
+        $("profileProgram").textContent = programme;
+    }
+
+    if ($("profileAvatar")) {
+        $("profileAvatar").textContent =
+            fullName.charAt(0).toUpperCase();
+    }
+
+    const isAdmin = role === "admin";
+    const canPost = ["class_rep", "lecturer", "admin"].includes(role);
+
+    if ($("adminPanel")) {
+        $("adminPanel").classList.toggle("hidden", !isAdmin);
+    }
+
+    if ($("adminNotice")) {
+        $("adminNotice").classList.toggle("hidden", isAdmin);
+    }
+
+    if ($("adminNav")) {
+        $("adminNav").classList.toggle("hidden", !isAdmin);
+    }
+
+    if ($("repPanel")) {
+        $("repPanel").classList.toggle("hidden", !canPost);
+    }
+
+    if ($("repPanel")) {
+        const heading = $("repPanel").querySelector("h2");
+
+        if (heading && role === "lecturer") {
+            heading.textContent = "Post a lecture announcement";
+        }
+    }
+
+    await refreshDashboard();
+    showPage("overviewPage");
+}
+
+/* Dashboard navigation */
+
+document.querySelectorAll(".nav-item").forEach(button => {
+    button.addEventListener("click", () => {
+        showPage(button.dataset.page);
+    });
+});
+
+document.querySelectorAll("[data-go-page]").forEach(button => {
+    button.addEventListener("click", () => {
+        showPage(button.dataset.goPage);
+    });
+});
+
+/* Header logo navigation */
+
+window.showPage = showPage;
+
+/* Logout */
+
+const logoutButton = $("logoutButton");
+
+if (logoutButton) {
+    logoutButton.addEventListener("click", async () => {
+        try {
+            await signOut();
+        } catch (error) {
+            notify("Logout failed: " + friendlyError(error), "error");
+        }
+    });
+}
+
+/* =========================================================
+   LOAD DATABASE RECORDS
+   ========================================================= */
 
 async function loadRooms() {
     const { data, error } = await db
@@ -111,120 +568,26 @@ async function loadRooms() {
 }
 
 async function loadPosts() {
-    const { data, error } = await db
+    let query = db
         .from("lecture_posts")
-        .select("*,classrooms(name,building,image_url),programs(name)")
+        .select(`
+            *,
+            classrooms(name,building,image_url),
+            programs(name)
+        `)
         .order("start_time", { ascending: true });
+
+    // Students see announcements for their own programme.
+    // Other roles may see broader announcements according to RLS.
+    if (profile?.role === "student" && profile.program_id != null) {
+        query = query.eq("program_id", profile.program_id);
+    }
+
+    const { data, error } = await query;
 
     if (error) throw error;
 
     posts = data || [];
-}
-
-function activeAt(post, now = Date.now()) {
-    const start = new Date(post.start_time).getTime();
-    const end = start + post.duration_minutes * 60000;
-
-    return !post.cancelled && start <= now && now < end;
-}
-
-function renderRooms() {
-    const now = Date.now();
-
-    $("classroomList").innerHTML = rooms.map(room => {
-        const roomPosts = posts.filter(post =>
-            Number(post.classroom_id) === Number(room.id) &&
-            activeAt(post, now)
-        );
-
-        const status = roomPosts.length ? "In use" : "Empty";
-        const statusClass = roomPosts.length ? "occupied" : "empty";
-
-        const image = room.image_url
-            ? `<img src="${escapeHTML(room.image_url)}"
-                    alt="${escapeHTML(room.name)}">`
-            : "";
-
-        const currentLectures = roomPosts.map(post =>
-            `<p>${escapeHTML(post.title)} — ${escapeHTML(post.programs?.name || "")}</p>`
-        ).join("");
-
-        return `
-            <article class="room">
-                <h3>${escapeHTML(room.name)}</h3>
-                ${image}
-                <p>Building: ${escapeHTML(room.building)}</p>
-                <p>Capacity: ${room.capacity}</p>
-                <p class="status ${statusClass}">Status: ${status}</p>
-                ${currentLectures}
-            </article>
-        `;
-    }).join("") || "<p>No classrooms have been added yet.</p>";
-
-    $("postRoom").innerHTML =
-        '<option value="">Choose classroom</option>';
-
-    rooms.forEach(room => {
-        $("postRoom").add(new Option(room.name, room.id));
-    });
-}
-
-function renderPosts() {
-    // This filter controls what students see in the interface.
-    // Database Row Level Security should enforce access permissions.
-    const visiblePosts = profile.role === "student"
-        ? posts.filter(post =>
-            Number(post.program_id) === Number(profile.program_id)
-        )
-        : posts;
-
-    $("postsHeading").textContent = profile.role === "student"
-        ? "Announcements for your programme"
-        : "All programme announcements";
-
-    $("postsList").innerHTML = visiblePosts.map(post => {
-        const isOwner = post.posted_by === currentUser.id;
-
-        const canCancel = !post.cancelled &&
-            (profile.role === "admin" || isOwner);
-
-        return `
-            <article class="post">
-                <h3>${escapeHTML(post.title)}</h3>
-
-                <p><strong>Programme:</strong>
-                    ${escapeHTML(post.programs?.name || "Unknown")}</p>
-
-                <p><strong>Classroom:</strong>
-                    ${escapeHTML(post.classrooms?.name || "Unknown")}</p>
-
-                <p><strong>Building:</strong>
-                    ${escapeHTML(post.classrooms?.building || "")}</p>
-
-                <p><strong>Starts:</strong>
-                    ${dateText(post.start_time)}</p>
-
-                <p><strong>Duration:</strong>
-                    ${post.duration_minutes} minutes</p>
-
-                <p>${escapeHTML(post.details)}</p>
-
-                ${post.cancelled
-                    ? '<p class="cancelled">LECTURE CANCELLED</p>'
-                    : ""}
-
-                ${canCancel
-                    ? `<button data-cancel="${post.id}">Cancel lecture</button>`
-                    : ""}
-            </article>
-        `;
-    }).join("") || "<p>No announcements available.</p>";
-
-    document.querySelectorAll("[data-cancel]").forEach(button => {
-        button.addEventListener("click", () =>
-            cancelPost(Number(button.dataset.cancel))
-        );
-    });
 }
 
 async function refreshDashboard() {
@@ -235,320 +598,547 @@ async function refreshDashboard() {
 
     renderRooms();
     renderPosts();
+    renderOverview();
 }
 
-async function showDashboard() {
-    await loadProfile();
+/* =========================================================
+   CLASSROOMS AND AVAILABILITY
+   ========================================================= */
 
-    $("authSection").hidden = true;
-    $("dashboard").hidden = false;
-    $("logoutBtn").hidden = false;
+function roomIsOccupied(roomId) {
+    const now = Date.now();
 
-    const program = programs.find(
-        p => Number(p.id) === Number(profile.program_id)
+    return posts.some(post =>
+        String(post.classroom_id) === String(roomId)
+        && getPostStatus(post) === "active"
     );
-
-    $("welcomeTitle").textContent =
-        `Welcome, ${profile.full_name || "User"}`;
-
-    $("userInfo").textContent =
-        `Role: ${profile.role.replace("_", " ")} | Programme: ${program?.name || "Not assigned"}`;
-
-    $("adminPanel").hidden = profile.role !== "admin";
-    $("repPanel").hidden = profile.role !== "class_rep";
-
-    await refreshDashboard();
 }
 
-// LOGIN
-$("loginForm").addEventListener("submit", async event => {
-    event.preventDefault();
+function renderRooms() {
+    const classroomList = $("classroomList");
+    const overviewRoomList = $("overviewRoomList");
 
-    try {
-        notify("Logging in...");
+    if (!classroomList) return;
 
-        const email = $("email").value.trim();
-        const password = $("password").value;
+    const search = ($("roomSearch")?.value || "").trim().toLowerCase();
+    const statusFilter = $("roomStatusFilter")?.value || "all";
 
-        if (!email || !password) {
-            notify("Please enter your email and password.");
-            return;
-        }
+    const filteredRooms = rooms.filter(room => {
+        const text = `${room.name || ""} ${room.building || ""}`
+            .toLowerCase();
 
-        const { data, error } = await db.auth.signInWithPassword({
-            email,
-            password
+        const matchesSearch = text.includes(search);
+        const occupied = roomIsOccupied(room.id);
+
+        const matchesStatus =
+            statusFilter === "all"
+            || (statusFilter === "occupied" && occupied)
+            || (statusFilter === "available" && !occupied);
+
+        return matchesSearch && matchesStatus;
+    });
+
+    classroomList.innerHTML = filteredRooms.map(room => {
+        const occupied = roomIsOccupied(room.id);
+        const status = occupied ? "Currently occupied" : "Available now";
+        const statusClass = occupied ? "occupied" : "empty";
+
+        const image = room.image_url
+            ? `<img src="${escapeHTML(room.image_url)}"
+                    alt="${escapeHTML(room.name)}"
+                    loading="lazy">`
+            : "";
+
+        const currentPosts = posts.filter(post =>
+            String(post.classroom_id) === String(room.id)
+            && getPostStatus(post) === "active"
+        );
+
+        const currentDetails = currentPosts.map(post => `
+            <p>
+                <strong>In progress:</strong>
+                ${escapeHTML(post.title)}
+            </p>
+        `).join("");
+
+        return `
+            <article class="room">
+                ${image}
+                <h3>${escapeHTML(room.name || "Unnamed classroom")}</h3>
+                <p><strong>Building:</strong>
+                    ${escapeHTML(room.building || "Not specified")}
+                </p>
+                <p><strong>Capacity:</strong>
+                    ${escapeHTML(room.capacity ?? "Not specified")}
+                </p>
+                <p class="status ${statusClass}">
+                    ${status}
+                </p>
+                ${currentDetails}
+            </article>
+        `;
+    }).join("") || "<p>No classrooms match your search.</p>";
+
+    if (overviewRoomList) {
+        overviewRoomList.innerHTML = rooms.slice(0, 5).map(room => {
+            const occupied = roomIsOccupied(room.id);
+
+            return `
+                <div class="mini-item">
+                    <div>
+                        <strong>${escapeHTML(room.name)}</strong>
+                        <p>${escapeHTML(room.building || "")}</p>
+                    </div>
+                    <span class="status ${occupied ? "occupied" : "empty"}">
+                        ${occupied ? "In use" : "Available"}
+                    </span>
+                </div>
+            `;
+        }).join("") || "<p>No classrooms registered.</p>";
+    }
+
+    const postRoom = $("postRoom");
+
+    if (postRoom) {
+        const selectedValue = postRoom.value;
+
+        postRoom.replaceChildren(
+            new Option("Select a classroom", "")
+        );
+
+        rooms.forEach(room => {
+            postRoom.add(new Option(room.name, room.id));
         });
 
-        if (error) throw error;
-
-        currentUser = data.user;
-
-        await loadPrograms();
-        await showDashboard();
-
-        notify("Login successful.");
-    } catch (error) {
-        console.error("Login failed:", error);
-        notify("Login failed: " + friendlyError(error));
+        if (rooms.some(room => String(room.id) === selectedValue)) {
+            postRoom.value = selectedValue;
+        }
     }
+}
+
+/* Classroom search and status filter */
+
+["roomSearch", "roomStatusFilter"].forEach(id => {
+    $(id)?.addEventListener("input", renderRooms);
+    $(id)?.addEventListener("change", renderRooms);
 });
 
-// SIGN UP
-$("signupForm").addEventListener("submit", async event => {
-    event.preventDefault();
+/* =========================================================
+   ANNOUNCEMENTS
+   ========================================================= */
 
-    try {
-        notify("Creating account...");
+function renderPosts() {
+    const postsList = $("postsList");
+    const overviewPostList = $("overviewPostList");
 
-        const { data, error } = await db.auth.signUp({
-            email: $("signupEmail").value.trim(),
-            password: $("signupPassword").value,
-            options: {
-                data: {
-                    full_name: $("fullName").value.trim()
-                }
-            }
-        });
+    if (!postsList) return;
 
-        if (error) throw error;
+    const search = ($("postSearch")?.value || "").trim().toLowerCase();
+    const statusFilter = $("postStatusFilter")?.value || "all";
 
-        if (!data.session) {
-            notify(
-                "Account created. Check your email to confirm, then log in. Ask an admin to assign your programme."
-            );
-            return;
-        }
+    const visiblePosts = posts.filter(post => {
+        const classroom = post.classrooms?.name || "";
+        const details = post.details || "";
+        const title = post.title || "";
 
-        currentUser = data.user;
+        const searchableText =
+            `${title} ${classroom} ${details}`.toLowerCase();
 
-        const programId = Number($("signupProgram").value);
+        const matchesSearch = searchableText.includes(search);
+        const status = getPostStatus(post);
+        const matchesStatus =
+            statusFilter === "all" || status === statusFilter;
 
-        if (!programId) {
-            notify(
-                "Account created. Log in and ask an admin to assign your programme."
-            );
-            return;
-        }
+        return matchesSearch && matchesStatus;
+    });
 
-        const { error: updateError } = await db
-            .from("profiles")
-            .update({ program_id: programId })
-            .eq("id", currentUser.id);
+    postsList.innerHTML = visiblePosts.map(post => {
+        const status = getPostStatus(post);
+        const isOwner = post.posted_by === currentUser?.id;
+        const canCancel =
+            !isCancelled(post)
+            && (profile?.role === "admin" || isOwner);
 
-        if (updateError) throw updateError;
+        return `
+            <article class="post">
+                <div class="post-heading">
+                    <h3>${escapeHTML(post.title || "Lecture announcement")}</h3>
+                    <span class="status ${status}">
+                        ${status === "active" ? "In progress" :
+                          status === "upcoming" ? "Upcoming" :
+                          status === "cancelled" ? "Cancelled" : "Past"}
+                    </span>
+                </div>
 
-        await loadPrograms();
-        await showDashboard();
+                <p>
+                    <strong>Programme:</strong>
+                    ${escapeHTML(post.programs?.name || "Not specified")}
+                </p>
 
-        notify("Student account created.");
-    } catch (error) {
-        console.error("Signup failed:", error);
-        notify(friendlyError(error));
+                <p>
+                    <strong>Classroom:</strong>
+                    ${escapeHTML(post.classrooms?.name || "Not specified")}
+                </p>
+
+                <p>
+                    <strong>Building:</strong>
+                    ${escapeHTML(post.classrooms?.building || "Not specified")}
+                </p>
+
+                <p><strong>Starts:</strong> ${formatDate(post.start_time)}</p>
+
+                <p>
+                    <strong>Duration:</strong>
+                    ${escapeHTML(post.duration_minutes)} minutes
+                </p>
+
+                ${post.details
+                    ? `<p>${escapeHTML(post.details)}</p>`
+                    : ""}
+
+                ${isCancelled(post)
+                    ? '<p class="cancelled">LECTURE CANCELLED</p>'
+                    : ""}
+
+                ${canCancel
+                    ? `<button class="button button-outline"
+                               type="button"
+                               data-cancel="${escapeHTML(post.id)}">
+                            Cancel lecture
+                       </button>`
+                    : ""}
+            </article>
+        `;
+    }).join("") || "<p>No announcements match your search.</p>";
+
+    if (overviewPostList) {
+        overviewPostList.innerHTML = [...posts]
+            .sort((a, b) =>
+                new Date(b.start_time) - new Date(a.start_time)
+            )
+            .slice(0, 5)
+            .map(post => `
+                <div class="mini-item">
+                    <div>
+                        <strong>${escapeHTML(post.title || "Lecture")}</strong>
+                        <p>${escapeHTML(post.classrooms?.name || "Room not specified")}</p>
+                        <p>${formatDate(post.start_time)}</p>
+                    </div>
+                    <span class="status ${getPostStatus(post)}">
+                        ${getPostStatus(post)}
+                    </span>
+                </div>
+            `).join("") || "<p>No announcements yet.</p>";
     }
+
+    postsList.querySelectorAll("[data-cancel]").forEach(button => {
+        button.addEventListener("click", async () => {
+            await cancelPost(button.dataset.cancel);
+        });
+    });
+}
+
+["postSearch", "postStatusFilter"].forEach(id => {
+    $(id)?.addEventListener("input", renderPosts);
+    $(id)?.addEventListener("change", renderPosts);
 });
 
-// ADD CLASSROOM
-$("classroomForm").addEventListener("submit", async event => {
-    event.preventDefault();
+/* Dashboard statistics */
 
+function renderOverview() {
+    if ($("totalRooms")) {
+        $("totalRooms").textContent = rooms.length;
+    }
+
+    if ($("availableRooms")) {
+        $("availableRooms").textContent =
+            rooms.filter(room => !roomIsOccupied(room.id)).length;
+    }
+
+    if ($("totalPosts")) {
+        $("totalPosts").textContent = posts.length;
+    }
+}
+
+/* Refresh button */
+
+$("refreshButton")?.addEventListener("click", async () => {
     try {
-        notify("Saving classroom...");
-
-        let imageUrl = null;
-        const file = $("roomImage").files[0];
-
-        if (file) {
-            if (
-                !file.type.startsWith("image/") ||
-                file.size > 5 * 1024 * 1024
-            ) {
-                throw new Error("Choose an image under 5 MB.");
-            }
-
-            const safeName = file.name.replace(
-                /[^a-zA-Z0-9._-]/g,
-                "_"
-            );
-
-            const path = `${crypto.randomUUID()}-${safeName}`;
-
-            const { error: uploadError } = await db.storage
-                .from("classroom-images")
-                .upload(path, file, { upsert: false });
-
-            if (uploadError) throw uploadError;
-
-            imageUrl = db.storage
-                .from("classroom-images")
-                .getPublicUrl(path).data.publicUrl;
-        }
-
-        const { error } = await db.from("classrooms").insert({
-            name: $("roomName").value.trim(),
-            building: $("building").value.trim(),
-            capacity: Number($("capacity").value),
-            image_url: imageUrl
-        });
-
-        if (error) throw error;
-
-        $("classroomForm").reset();
-
+        notify("Refreshing classroom information...");
         await refreshDashboard();
-
-        notify("Classroom saved successfully.");
+        notify("Classroom information has been refreshed.");
     } catch (error) {
-        console.error("Classroom error:", error);
-        notify(friendlyError(error));
+        notify("Refresh failed: " + friendlyError(error), "error");
     }
 });
 
-// UPDATE USER ROLE
-$("roleForm").addEventListener("submit", async event => {
-    event.preventDefault();
+/* =========================================================
+   ADMIN: ADD CLASSROOM
+   ========================================================= */
 
-    try {
-        const uid = $("targetUid").value.trim();
-        const role = $("targetRole").value;
-        const programValue = $("targetProgram").value;
+const classroomForm = $("classroomForm");
 
-        const { error } = await db.from("profiles")
-            .update({
-                role,
-                program_id: programValue
-                    ? Number(programValue)
-                    : null
-            })
-            .eq("id", uid);
+if (classroomForm) {
+    classroomForm.addEventListener("submit", async event => {
+        event.preventDefault();
 
-        if (error) throw error;
-
-        notify("User role and programme updated.");
-    } catch (error) {
-        console.error("Role update error:", error);
-        notify(friendlyError(error));
-    }
-});
-
-// CREATE LECTURE ANNOUNCEMENT
-$("postForm").addEventListener("submit", async event => {
-    event.preventDefault();
-
-    try {
-        if (!profile) {
-            throw new Error("Please log in before publishing a lecture.");
-        }
-
-        if (!profile.program_id) {
-            throw new Error(
-                "An administrator must assign your programme first."
-            );
-        }
-
-        const start = new Date($("postStart").value);
-
-        if (
-            Number.isNaN(start.getTime()) ||
-            start <= new Date()
-        ) {
-            throw new Error("Choose a future lecture start time.");
-        }
-
-        const roomId = Number($("postRoom").value);
-        const duration = Number($("postDuration").value);
-
-        if (!roomId) {
-            throw new Error("Please choose a classroom.");
-        }
-
-        if (!Number.isFinite(duration) || duration <= 0) {
-            throw new Error("Please choose a valid lecture duration.");
-        }
-
-        const end = start.getTime() + duration * 60000;
-
-        // Quick front-end check. The database constraint is the
-        // final protection if the dashboard data is out of date.
-        const conflict = posts.some(post => {
-            if (
-                Number(post.classroom_id) !== roomId ||
-                post.cancelled
-            ) {
-                return false;
+        try {
+            if (profile?.role !== "admin") {
+                throw new Error("Only an administrator can add classrooms.");
             }
 
-            const otherStart = new Date(post.start_time).getTime();
+            const name = $("roomName").value.trim();
+            const building = $("roomBuilding").value.trim();
+            const capacity = Number($("roomCapacity").value);
+            const file = $("roomImage").files?.[0];
 
-            const otherEnd = post.lecture_end_time
-                ? new Date(post.lecture_end_time).getTime()
-                : otherStart + Number(post.duration_minutes) * 60000;
+            if (!name || !building || !Number.isFinite(capacity) || capacity < 1) {
+                throw new Error("Enter a classroom name, building and valid capacity.");
+            }
 
-            return start.getTime() < otherEnd &&
-                   end > otherStart;
-        });
+            notify("Saving classroom...");
 
-        if (conflict) {
-            notify(
-                "This classroom is already booked for part of that time. Please choose another classroom or a different start time."
-            );
-            return;
-        }
+            let imageUrl = null;
 
-        notify("Publishing lecture announcement...");
+            if (file) {
+                if (!file.type.startsWith("image/")) {
+                    throw new Error("Please select an image file.");
+                }
 
-        const { error } = await db.from("lecture_posts").insert({
-            program_id: profile.program_id,
-            classroom_id: roomId,
-            posted_by: currentUser.id,
-            title: $("postTitle").value.trim(),
-            details: $("postDetails").value.trim(),
-            start_time: start.toISOString(),
-            duration_minutes: duration
-        });
+                if (file.size > 5 * 1024 * 1024) {
+                    throw new Error("The image must be smaller than 5 MB.");
+                }
 
-        // Supabase returns code 23P01 if the database constraint
-        // detects a conflict that the front-end check did not see.
-        if (error) {
-            if (
-                error.code === "23P01" ||
-                error.message?.includes(
-                    "no_overlapping_classroom_lectures"
-                )
-            ) {
-                notify(
-                    "This classroom is already booked for part of that time. Please choose another classroom or a different start time."
+                const safeName = file.name.replace(
+                    /[^a-zA-Z0-9._-]/g,
+                    "_"
                 );
 
-                // Reload current data in case another user made a booking.
-                try {
-                    await refreshDashboard();
-                } catch (refreshError) {
-                    console.error(
-                        "Dashboard refresh failed:",
-                        refreshError
-                    );
+                const path = `${crypto.randomUUID()}-${safeName}`;
+
+                const { error: uploadError } = await db
+                    .storage
+                    .from("classroom-images")
+                    .upload(path, file, { upsert: false });
+
+                if (uploadError) throw uploadError;
+
+                imageUrl = db
+                    .storage
+                    .from("classroom-images")
+                    .getPublicUrl(path).data.publicUrl;
+            }
+
+            const { error } = await db.from("classrooms").insert({
+                name,
+                building,
+                capacity,
+                image_url: imageUrl
+            });
+
+            if (error) throw error;
+
+            classroomForm.reset();
+            await refreshDashboard();
+
+            notify("Classroom added successfully.");
+        } catch (error) {
+            notify("Could not add classroom: " + friendlyError(error), "error");
+        }
+    });
+}
+
+/* =========================================================
+   ADMIN: ASSIGN USER ROLE AND PROGRAMME
+   ========================================================= */
+
+const roleForm = $("roleForm");
+
+if (roleForm) {
+    roleForm.addEventListener("submit", async event => {
+        event.preventDefault();
+
+        try {
+            if (profile?.role !== "admin") {
+                throw new Error("Only an administrator can change user roles.");
+            }
+
+            const userId = $("targetUserId").value.trim();
+            const role = $("targetRole").value;
+            const programId = $("targetProgram").value;
+
+            if (!userId) {
+                throw new Error("Enter the user's profile ID.");
+            }
+
+            notify("Updating user account...");
+
+            const { data, error } = await db
+                .from("profiles")
+                .update({
+                    role,
+                    program_id: programId || null
+                })
+                .eq("id", userId)
+                .select("id");
+
+            if (error) throw error;
+
+            if (!data || data.length === 0) {
+                throw new Error(
+                    "No profile was updated. Check the profile ID and database permissions."
+                );
+            }
+
+            roleForm.reset();
+
+            notify("User role and programme updated successfully.");
+        } catch (error) {
+            notify("Could not update user: " + friendlyError(error), "error");
+        }
+    });
+}
+
+/* =========================================================
+   CLASS REPRESENTATIVE / LECTURER: POST LECTURE
+   ========================================================= */
+
+const postForm = $("postForm");
+
+if (postForm) {
+    postForm.addEventListener("submit", async event => {
+        event.preventDefault();
+
+        try {
+            if (!currentUser || !profile) {
+                throw new Error("Please sign in before posting a lecture.");
+            }
+
+            if (!["class_rep", "lecturer", "admin"].includes(profile.role)) {
+                throw new Error(
+                    "Your account does not have permission to post lectures."
+                );
+            }
+
+            if (!profile.program_id) {
+                throw new Error(
+                    "Your account has no assigned programme. Ask an administrator to assign one."
+                );
+            }
+
+            const title = $("postTitle").value.trim();
+            const details = $("postDetails").value.trim();
+            const classroomId = $("postRoom").value;
+            const startValue = $("postStart").value;
+            const duration = Number($("postDuration").value);
+
+            if (!title || !classroomId || !startValue) {
+                throw new Error(
+                    "Enter the lecture title, classroom and start time."
+                );
+            }
+
+            if (!Number.isFinite(duration) || duration < 1 || duration > 1440) {
+                throw new Error("Duration must be between 1 and 1440 minutes.");
+            }
+
+            const start = new Date(startValue);
+
+            if (Number.isNaN(start.getTime()) || start <= new Date()) {
+                throw new Error("Choose a future lecture start time.");
+            }
+
+            const startMs = start.getTime();
+            const endMs = startMs + duration * 60000;
+
+            // Friendly early check. The database exclusion constraint
+            // remains the final protection against simultaneous bookings.
+            const conflict = posts.some(post => {
+                if (
+                    String(post.classroom_id) !== String(classroomId) ||
+                    isCancelled(post)
+                ) {
+                    return false;
                 }
 
+                const otherStart = new Date(post.start_time).getTime();
+                const otherEnd = getPostEnd(post);
+
+                return startMs < otherEnd && endMs > otherStart;
+            });
+
+            if (conflict) {
+                notify(
+                    "This classroom is already booked during part of that time. Please choose another classroom or a different start time.",
+                    "error"
+                );
                 return;
             }
 
-            throw error;
+            notify("Publishing lecture announcement...");
+
+            const { error } = await db.from("lecture_posts").insert({
+                program_id: profile.program_id,
+                classroom_id: classroomId,
+                posted_by: currentUser.id,
+                title,
+                details,
+                start_time: start.toISOString(),
+                duration_minutes: duration,
+                cancelled: false
+            });
+
+            if (error) {
+                if (
+                    error.code === "23P01" ||
+                    error.message?.includes("no_overlapping_classroom_lectures")
+                ) {
+                    notify(
+                        "This classroom has just been booked for an overlapping time. Please select another classroom or start time.",
+                        "error"
+                    );
+
+                    await refreshDashboard();
+                    return;
+                }
+
+                throw error;
+            }
+
+            postForm.reset();
+            $("postDuration").value = 60;
+
+            await refreshDashboard();
+
+            notify("Lecture announcement published successfully.");
+            showPage("announcementsPage");
+        } catch (error) {
+            notify("Could not publish lecture: " + friendlyError(error), "error");
         }
+    });
+}
 
-        $("postForm").reset();
+/* =========================================================
+   CANCEL A LECTURE
+   ========================================================= */
 
-        await refreshDashboard();
+async function cancelPost(postId) {
+    const post = posts.find(item => String(item.id) === String(postId));
 
-        notify("Lecture announcement published successfully.");
-    } catch (error) {
-        console.error("Lecture post error:", error);
-        notify(friendlyError(error));
+    if (!post) {
+        notify("This announcement could not be found. Refresh and try again.");
+        return;
     }
-});
 
-// CANCEL LECTURE
-async function cancelPost(id) {
+    const isOwner = post.posted_by === currentUser?.id;
+    const canCancel =
+        profile?.role === "admin" || isOwner;
+
+    if (!canCancel) {
+        notify("You are not allowed to cancel this announcement.", "error");
+        return;
+    }
+
     if (!confirm("Are you sure you want to cancel this lecture?")) {
         return;
     }
@@ -557,7 +1147,7 @@ async function cancelPost(id) {
         const { error } = await db
             .from("lecture_posts")
             .update({ cancelled: true })
-            .eq("id", id);
+            .eq("id", postId);
 
         if (error) throw error;
 
@@ -565,71 +1155,66 @@ async function cancelPost(id) {
 
         notify("Lecture cancelled successfully.");
     } catch (error) {
-        console.error("Cancel lecture error:", error);
-        notify(friendlyError(error));
+        notify("Could not cancel lecture: " + friendlyError(error), "error");
     }
 }
 
-// LOG OUT
-$("logoutBtn").addEventListener("click", async () => {
-    try {
-        const { error } = await db.auth.signOut();
+/* =========================================================
+   AUTHENTICATION STARTUP
+   ========================================================= */
 
-        if (error) throw error;
-
-        currentUser = null;
-        profile = null;
-
-        $("dashboard").hidden = true;
-        $("authSection").hidden = false;
-        $("logoutBtn").hidden = true;
-
-        notify("You have logged out.");
-    } catch (error) {
-        console.error("Logout error:", error);
-        notify(friendlyError(error));
-    }
-});
-
-// START APPLICATION
 async function startApp() {
-    try {
-        if (
-            SUPABASE_URL.includes("YOUR_") ||
-            SUPABASE_KEY.includes("YOUR_")
-        ) {
-            notify(
-                "Add your Supabase Project URL and publishable key in app.js."
-            );
-            return;
-        }
+    const year = $("currentYear");
 
+    if (year) {
+        year.textContent = new Date().getFullYear();
+    }
+
+    try {
         await loadPrograms();
 
         const { data, error } = await db.auth.getSession();
 
         if (error) throw error;
 
-        if (data.session) {
+        if (data.session?.user) {
             currentUser = data.session.user;
             await showDashboard();
+        } else {
+            reveal($("authSection"));
+            hide($("dashboard"));
+            hide($("logoutButton"));
         }
     } catch (error) {
-        console.error("Application startup error:", error);
-        notify(friendlyError(error));
+        console.error("Application startup failed:", error);
+        notify("Application could not start: " + friendlyError(error), "error");
     }
 }
 
-// HANDLE AUTHENTICATION CHANGES
+/* Handle login, logout, and password recovery events */
+
 db.auth.onAuthStateChange((event, session) => {
     if (event === "SIGNED_OUT") {
         currentUser = null;
         profile = null;
 
-        $("dashboard").hidden = true;
-        $("authSection").hidden = false;
-        $("logoutBtn").hidden = true;
+        hide($("dashboard"));
+        hide($("resetPasswordSection"));
+        hide($("logoutButton"));
+        reveal($("authSection"));
+
+        if ($("headerUser")) {
+            $("headerUser").textContent = "Welcome";
+        }
+    }
+
+    if (event === "PASSWORD_RECOVERY") {
+        hide($("authSection"));
+        hide($("dashboard"));
+        reveal($("resetPasswordSection"));
+        notify("Enter and confirm your new password.");
     }
 });
 
 startApp();
+
