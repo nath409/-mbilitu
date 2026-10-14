@@ -2,7 +2,6 @@
 /* =========================================================
    MUKUBA UNIVERSITY CLASSROOM MANAGEMENT SYSTEM
    Complete app.js
-   HTML + CSS + JavaScript + Supabase
 ========================================================= */
 
 const SUPABASE_URL = "https://mbieizajeifupzuokefx.supabase.co";
@@ -10,17 +9,16 @@ const SUPABASE_KEY = "sb_publishable_0ns5_TamqKpwft8NV1rkKw_MebMI8d0";
 
 const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-/* =========================================================
-   GLOBAL VARIABLES
-========================================================= */
-
 let currentUser = null;
 let profile = null;
 let programs = [];
 let classrooms = [];
 let posts = [];
+
 let refreshInProgress = false;
 let refreshTimer = null;
+let realtimeChannel = null;
+let authReady = false;
 
 const $ = id => document.getElementById(id);
 
@@ -39,14 +37,14 @@ const escapeHTML = value =>
     })[character]);
 
 function notify(message, type = "info") {
-    const toastRegion = $("toastRegion");
+    const region = $("toastRegion");
     const messageBox = $("message");
 
-    if (toastRegion) {
+    if (region) {
         const toast = document.createElement("div");
         toast.className = `toast toast-${type}`;
         toast.textContent = message;
-        toastRegion.appendChild(toast);
+        region.appendChild(toast);
 
         window.setTimeout(() => toast.remove(), 5000);
     } else if (messageBox) {
@@ -71,7 +69,7 @@ function friendlyError(error) {
             "no_overlapping_classroom_lectures"
         )
     ) {
-        return "This classroom has a conflicting lecture. Please select another available classroom.";
+        return "This classroom has a conflicting lecture. Please choose another available classroom.";
     }
 
     if (error.code === "23505") {
@@ -82,12 +80,16 @@ function friendlyError(error) {
         return "You do not have permission to perform this action.";
     }
 
-    if (error.message?.toLowerCase().includes("invalid login")) {
+    if (
+        error.message?.toLowerCase().includes("invalid login")
+    ) {
         return "Incorrect email or password.";
     }
 
-    if (error.message?.toLowerCase().includes("email not confirmed")) {
-        return "Please confirm your email address before signing in.";
+    if (
+        error.message?.toLowerCase().includes("email not confirmed")
+    ) {
+        return "Please confirm your email before signing in.";
     }
 
     if (
@@ -126,7 +128,6 @@ function showDashboard() {
     setVisible($("dashboard"), true);
 
     showPage("overview");
-    refreshDashboard();
 }
 
 function updateYear() {
@@ -136,7 +137,7 @@ function updateYear() {
 }
 
 /* =========================================================
-   LOAD PROGRAMS
+   LOAD PROGRAMMES
 ========================================================= */
 
 async function loadPrograms() {
@@ -149,10 +150,7 @@ async function loadPrograms() {
 
     programs = data || [];
 
-    const signupProgram = $("signupProgram");
-    const targetProgram = $("targetProgram");
-
-    [signupProgram, targetProgram].forEach(select => {
+    [$("signupProgram"), $("targetProgram")].forEach(select => {
         if (!select) return;
 
         const previousValue = select.value;
@@ -162,9 +160,7 @@ async function loadPrograms() {
         );
 
         programs.forEach(program => {
-            select.add(
-                new Option(program.name, program.id)
-            );
+            select.add(new Option(program.name, program.id));
         });
 
         if (
@@ -177,7 +173,7 @@ async function loadPrograms() {
 }
 
 /* =========================================================
-   LOAD USER PROFILE
+   LOAD PROFILE
 ========================================================= */
 
 async function loadProfile() {
@@ -194,20 +190,21 @@ async function loadProfile() {
 
     if (error) throw error;
 
-    profile = data;
-
-    if (!profile) {
+    if (!data) {
         throw new Error(
-            "Your user profile could not be found. Please contact the system administrator."
+            "Your user profile was not found. Please contact the administrator."
         );
     }
+
+    profile = data;
 
     const program = programs.find(
         p => String(p.id) === String(profile.program_id)
     );
 
     if ($("headerUser")) {
-        $("headerUser").textContent = profile.full_name || currentUser.email;
+        $("headerUser").textContent =
+            profile.full_name || currentUser.email;
     }
 
     if ($("welcomeName")) {
@@ -221,7 +218,8 @@ async function loadProfile() {
     }
 
     if ($("profileName")) {
-        $("profileName").textContent = profile.full_name || "Not provided";
+        $("profileName").textContent =
+            profile.full_name || "Not provided";
     }
 
     if ($("profileEmail")) {
@@ -229,7 +227,8 @@ async function loadProfile() {
     }
 
     if ($("profileRole")) {
-        $("profileRole").textContent = profile.role || "student";
+        $("profileRole").textContent =
+            profile.role || "student";
     }
 
     if ($("profileProgram")) {
@@ -272,7 +271,7 @@ async function loadClassrooms() {
 }
 
 /* =========================================================
-   LOAD LECTURE ANNOUNCEMENTS
+   LOAD ANNOUNCEMENTS
 ========================================================= */
 
 async function loadPosts() {
@@ -300,11 +299,6 @@ async function loadPosts() {
         `)
         .order("start_time", { ascending: false });
 
-    /*
-       Students see announcements for their own programme.
-       Staff and class representatives can see all programmes.
-    */
-
     if (
         profile?.role === "student" &&
         profile.program_id
@@ -320,26 +314,26 @@ async function loadPosts() {
 }
 
 /* =========================================================
-   LECTURE STATUS AND CLASSROOM AVAILABILITY
+   LECTURE STATUS
 ========================================================= */
 
 function getPostStatus(post) {
     if (post.cancelled) return "cancelled";
 
-    const startTime = new Date(post.start_time).getTime();
+    const start = new Date(post.start_time).getTime();
 
-    const endTime = post.lecture_end_time
+    const end = post.lecture_end_time
         ? new Date(post.lecture_end_time).getTime()
-        : startTime + Number(post.duration_minutes) * 60000;
+        : start + Number(post.duration_minutes) * 60000;
 
     const now = Date.now();
 
-    if (Number.isNaN(startTime) || Number.isNaN(endTime)) {
+    if (!Number.isFinite(start) || !Number.isFinite(end)) {
         return "unknown";
     }
 
-    if (now < startTime) return "upcoming";
-    if (now < endTime) return "active";
+    if (now < start) return "upcoming";
+    if (now < end) return "active";
 
     return "past";
 }
@@ -371,16 +365,13 @@ function formatDateTime(value) {
 
     const date = new Date(value);
 
-    if (Number.isNaN(date.getTime())) {
-        return "Not available";
-    }
-
-    return date.toLocaleString();
+    return Number.isNaN(date.getTime())
+        ? "Not available"
+        : date.toLocaleString();
 }
 
 /* =========================================================
-   CLASSROOM DROPDOWN
-   Only currently available classrooms can be selected.
+   AVAILABLE CLASSROOM DROPDOWN
 ========================================================= */
 
 function renderPostRoomDropdown() {
@@ -422,7 +413,7 @@ function renderPostRoomDropdown() {
 }
 
 /* =========================================================
-   RENDER CLASSROOM DIRECTORY
+   CLASSROOM DIRECTORY
 ========================================================= */
 
 function renderRooms() {
@@ -433,30 +424,26 @@ function renderRooms() {
     if (!container) return;
 
     const search = ($("roomSearch")?.value || "").toLowerCase();
-    const statusFilter = $("roomStatusFilter")?.value || "all";
+    const filter = $("roomStatusFilter")?.value || "all";
 
-    const filteredRooms = classrooms.filter(room => {
+    const filtered = classrooms.filter(room => {
         const text =
             `${room.name} ${room.building || ""}`.toLowerCase();
 
         const matchesSearch = text.includes(search);
-
         const status = getRoomStatus(room.id).toLowerCase();
 
-        const matchesStatus =
-            statusFilter === "all" ||
-            status === statusFilter.toLowerCase();
-
-        return matchesSearch && matchesStatus;
+        return matchesSearch &&
+            (filter === "all" || status === filter.toLowerCase());
     });
 
-    if (!filteredRooms.length) {
+    if (!filtered.length) {
         container.innerHTML =
             `<p class="empty-state">No classrooms match your search.</p>`;
         return;
     }
 
-    container.innerHTML = filteredRooms.map(room => {
+    container.innerHTML = filtered.map(room => {
         const occupied = roomIsOccupied(room.id);
 
         const image = room.image_url
@@ -482,7 +469,7 @@ function renderRooms() {
 }
 
 /* =========================================================
-   RENDER ANNOUNCEMENTS
+   ANNOUNCEMENTS
 ========================================================= */
 
 function renderPosts() {
@@ -490,49 +477,39 @@ function renderPosts() {
     if (!container) return;
 
     const search = ($("postSearch")?.value || "").toLowerCase();
-    const statusFilter = $("postStatusFilter")?.value || "all";
+    const filter = $("postStatusFilter")?.value || "all";
 
-    const filteredPosts = posts.filter(post => {
-        const roomName = post.classrooms?.name || "";
-        const programName = post.programs?.name || "";
-
+    const filtered = posts.filter(post => {
         const text = `
             ${post.title || ""}
             ${post.details || ""}
-            ${roomName}
-            ${programName}
+            ${post.classrooms?.name || ""}
+            ${post.programs?.name || ""}
         `.toLowerCase();
 
         const status = getPostStatus(post);
 
-        const matchesSearch = text.includes(search);
-
-        const matchesStatus =
-            statusFilter === "all" ||
-            status === statusFilter;
-
-        return matchesSearch && matchesStatus;
+        return text.includes(search) &&
+            (filter === "all" || status === filter);
     });
 
-    if (!filteredPosts.length) {
+    if (!filtered.length) {
         container.innerHTML =
             `<p class="empty-state">No announcements found.</p>`;
         return;
     }
 
-    container.innerHTML = filteredPosts.map(post => {
+    container.innerHTML = filtered.map(post => {
         const status = getPostStatus(post);
         const room = post.classrooms || {};
         const program = post.programs || {};
 
         const canCancel =
-            isAdmin() ||
-            post.posted_by === currentUser?.id;
+            isAdmin() || post.posted_by === currentUser?.id;
 
         const cancelButton =
             canCancel && !post.cancelled && status !== "past"
                 ? `<button type="button"
-                           class="cancel-post-button"
                            data-cancel-post="${escapeHTML(post.id)}">
                        Cancel lecture
                    </button>`
@@ -548,30 +525,12 @@ function renderPosts() {
                 </div>
 
                 <p>${escapeHTML(post.details || "No additional details.")}</p>
-
-                <p><strong>Classroom:</strong>
-                    ${escapeHTML(room.name || "Unknown classroom")}
-                </p>
-
-                <p><strong>Building:</strong>
-                    ${escapeHTML(room.building || "Not specified")}
-                </p>
-
-                <p><strong>Programme:</strong>
-                    ${escapeHTML(program.name || "Not specified")}
-                </p>
-
-                <p><strong>Started:</strong>
-                    ${escapeHTML(formatDateTime(post.start_time))}
-                </p>
-
-                <p><strong>Duration:</strong>
-                    ${escapeHTML(post.duration_minutes)} minutes
-                </p>
-
-                <p><strong>Expected end:</strong>
-                    ${escapeHTML(formatDateTime(getPostEndTime(post)))}
-                </p>
+                <p><strong>Classroom:</strong> ${escapeHTML(room.name || "Unknown")}</p>
+                <p><strong>Building:</strong> ${escapeHTML(room.building || "Not specified")}</p>
+                <p><strong>Programme:</strong> ${escapeHTML(program.name || "Not specified")}</p>
+                <p><strong>Started:</strong> ${escapeHTML(formatDateTime(post.start_time))}</p>
+                <p><strong>Duration:</strong> ${escapeHTML(post.duration_minutes)} minutes</p>
+                <p><strong>Expected end:</strong> ${escapeHTML(formatDateTime(getPostEndTime(post)))}</p>
 
                 ${cancelButton}
             </article>
@@ -586,7 +545,7 @@ function renderPosts() {
 }
 
 /* =========================================================
-   OVERVIEW DASHBOARD
+   OVERVIEW
 ========================================================= */
 
 function renderOverview() {
@@ -594,39 +553,31 @@ function renderOverview() {
         $("totalRooms").textContent = classrooms.length;
     }
 
-    const availableCount = classrooms.filter(
-        room => !roomIsOccupied(room.id)
-    ).length;
-
     if ($("availableRooms")) {
-        $("availableRooms").textContent = availableCount;
+        $("availableRooms").textContent =
+            classrooms.filter(room => !roomIsOccupied(room.id)).length;
     }
 
     if ($("totalPosts")) {
-        $("totalPosts").textContent = posts.filter(
-            post => !post.cancelled && getPostStatus(post) === "active"
-        ).length;
+        $("totalPosts").textContent =
+            posts.filter(post => getPostStatus(post) === "active").length;
     }
 
     const roomList = $("overviewRoomList");
 
     if (roomList) {
-        const recentRooms = classrooms.slice(0, 5);
+        roomList.innerHTML = classrooms.slice(0, 5).map(room => {
+            const occupied = roomIsOccupied(room.id);
 
-        roomList.innerHTML = recentRooms.length
-            ? recentRooms.map(room => {
-                const occupied = roomIsOccupied(room.id);
-
-                return `
-                    <div class="overview-list-item">
-                        <span>${escapeHTML(room.name)}</span>
-                        <span class="status ${occupied ? "occupied" : "available"}">
-                            ${occupied ? "Occupied" : "Available"}
-                        </span>
-                    </div>
-                `;
-            }).join("")
-            : `<p>No classrooms have been added.</p>`;
+            return `
+                <div class="overview-list-item">
+                    <span>${escapeHTML(room.name)}</span>
+                    <span class="status ${occupied ? "occupied" : "available"}">
+                        ${occupied ? "Occupied" : "Available"}
+                    </span>
+                </div>
+            `;
+        }).join("") || "<p>No classrooms have been added.</p>";
     }
 
     const postList = $("overviewPostList");
@@ -636,44 +587,40 @@ function renderOverview() {
             .filter(post => getPostStatus(post) === "active")
             .slice(0, 5);
 
-        postList.innerHTML = activePosts.length
-            ? activePosts.map(post => `
-                <div class="overview-list-item">
-                    <span>${escapeHTML(post.title)}</span>
-                    <span>${escapeHTML(post.classrooms?.name || "Classroom")}</span>
-                </div>
-            `).join("")
-            : `<p>There are no lectures in progress.</p>`;
+        postList.innerHTML = activePosts.map(post => `
+            <div class="overview-list-item">
+                <span>${escapeHTML(post.title)}</span>
+                <span>${escapeHTML(post.classrooms?.name || "Classroom")}</span>
+            </div>
+        `).join("") || "<p>There are no lectures in progress.</p>";
     }
 }
 
 /* =========================================================
-   NAVIGATION
+   DASHBOARD NAVIGATION
 ========================================================= */
 
 function showPage(pageName) {
-    document.querySelectorAll(".page-section, .dashboard-page").forEach(page => {
-        page.classList.remove("active");
-    });
+    document.querySelectorAll(".page-section, .dashboard-page")
+        .forEach(page => page.classList.remove("active"));
 
     const target = $(`${pageName}Page`);
 
-    if (target) {
-        target.classList.add("active");
-    }
+    if (target) target.classList.add("active");
 
-    document.querySelectorAll(".nav-item[data-page]").forEach(button => {
-        button.classList.toggle(
-            "active",
-            button.dataset.page === pageName
-        );
-    });
+    document.querySelectorAll(".nav-item[data-page]")
+        .forEach(button => {
+            button.classList.toggle(
+                "active",
+                button.dataset.page === pageName
+            );
+        });
 }
 
 window.showPage = showPage;
 
 /* =========================================================
-   REFRESH DASHBOARD DATA
+   DASHBOARD REFRESH
 ========================================================= */
 
 async function refreshDashboard() {
@@ -699,7 +646,7 @@ async function refreshDashboard() {
 }
 
 /* =========================================================
-   SIGN IN
+   LOGIN
 ========================================================= */
 
 $("loginForm")?.addEventListener("submit", async event => {
@@ -733,7 +680,7 @@ $("loginForm")?.addEventListener("submit", async event => {
 });
 
 /* =========================================================
-   SIGN UP
+   SIGNUP
 ========================================================= */
 
 $("signupForm")?.addEventListener("submit", async event => {
@@ -763,11 +710,7 @@ $("signupForm")?.addEventListener("submit", async event => {
 
         if (error) throw error;
 
-        if (data.session) {
-            /*
-              This assumes your Supabase database has a trigger
-              that creates a profiles row after signup.
-            */
+        if (data.session && data.user) {
             const { error: profileError } = await db
                 .from("profiles")
                 .update({
@@ -800,10 +743,7 @@ $("forgotPasswordLink")?.addEventListener("click", async event => {
     const email = $("loginEmail")?.value.trim();
 
     if (!email) {
-        notify(
-            "Enter your email address in the login email field first.",
-            "error"
-        );
+        notify("Enter your email in the login email field first.", "error");
         return;
     }
 
@@ -815,7 +755,7 @@ $("forgotPasswordLink")?.addEventListener("click", async event => {
         if (error) throw error;
 
         notify(
-            "If an account exists for that email, a password reset link will be sent.",
+            "If an account exists for that email, a reset link will be sent.",
             "success"
         );
     } catch (error) {
@@ -844,13 +784,11 @@ $("resetPasswordForm")?.addEventListener("submit", async event => {
     }
 
     try {
-        const { error } = await db.auth.updateUser({
-            password
-        });
+        const { error } = await db.auth.updateUser({ password });
 
         if (error) throw error;
 
-        notify("Password updated successfully. You can now sign in.", "success");
+        notify("Password updated successfully.", "success");
 
         await db.auth.signOut();
         showAuth();
@@ -860,7 +798,7 @@ $("resetPasswordForm")?.addEventListener("submit", async event => {
 });
 
 /* =========================================================
-   LOG OUT
+   LOGOUT
 ========================================================= */
 
 $("logoutButton")?.addEventListener("click", async () => {
@@ -872,8 +810,8 @@ $("logoutButton")?.addEventListener("click", async () => {
 });
 
 /* =========================================================
-   POST A LECTURE
-   Start time is set automatically to NOW.
+   POST LECTURE
+   The start time is automatically set to the current time.
 ========================================================= */
 
 $("postForm")?.addEventListener("submit", async event => {
@@ -894,29 +832,31 @@ $("postForm")?.addEventListener("submit", async event => {
     const roomId = $("postRoom")?.value;
     const duration = Number($("postDuration")?.value);
 
-    if (!title || !roomId || !Number.isFinite(duration) || duration <= 0) {
-        notify("Enter a title, select an available classroom, and provide a valid duration.", "error");
+    if (
+        !title ||
+        !roomId ||
+        !Number.isFinite(duration) ||
+        duration <= 0
+    ) {
+        notify(
+            "Enter a title, select a classroom, and enter a valid duration.",
+            "error"
+        );
         return;
     }
 
-    const selectedRoom = classrooms.find(
-        room => String(room.id) === String(roomId)
+    const room = classrooms.find(
+        item => String(item.id) === String(roomId)
     );
 
-    if (!selectedRoom) {
+    if (!room) {
         notify("Please select a valid classroom.", "error");
         return;
     }
 
-    /*
-      Recheck availability immediately before saving.
-      The database exclusion constraint is the final safeguard
-      against simultaneous conflicting submissions.
-    */
-
     if (roomIsOccupied(roomId)) {
         notify(
-            "That classroom is now occupied. Please choose another classroom.",
+            "This classroom is now occupied. Please choose another.",
             "error"
         );
 
@@ -951,7 +891,7 @@ $("postForm")?.addEventListener("submit", async event => {
 
     if (hasOverlap) {
         notify(
-            "This classroom has a conflicting lecture. Please choose another classroom.",
+            "This classroom has a conflicting lecture. Choose another classroom.",
             "error"
         );
 
@@ -959,8 +899,8 @@ $("postForm")?.addEventListener("submit", async event => {
         return;
     }
 
-    const submitButton = event.submitter;
-    if (submitButton) submitButton.disabled = true;
+    const button = event.submitter;
+    if (button) button.disabled = true;
 
     try {
         const { error } = await db
@@ -980,19 +920,22 @@ $("postForm")?.addEventListener("submit", async event => {
 
         $("postForm").reset();
 
-        notify("Lecture published. The classroom is now marked as occupied.", "success");
+        notify(
+            "Lecture published. The classroom is now marked as occupied.",
+            "success"
+        );
 
         await refreshDashboard();
     } catch (error) {
         notify(friendlyError(error), "error");
         await refreshDashboard();
     } finally {
-        if (submitButton) submitButton.disabled = false;
+        if (button) button.disabled = false;
     }
 });
 
 /* =========================================================
-   CANCEL A LECTURE
+   CANCEL LECTURE
 ========================================================= */
 
 async function cancelPost(postId) {
@@ -1005,10 +948,7 @@ async function cancelPost(postId) {
         return;
     }
 
-    if (
-        !isAdmin() &&
-        post.posted_by !== currentUser?.id
-    ) {
+    if (!isAdmin() && post.posted_by !== currentUser?.id) {
         notify("You cannot cancel another user's lecture.", "error");
         return;
     }
@@ -1026,7 +966,6 @@ async function cancelPost(postId) {
         if (error) throw error;
 
         notify("Lecture cancelled.", "success");
-
         await refreshDashboard();
     } catch (error) {
         notify(friendlyError(error), "error");
@@ -1050,23 +989,30 @@ $("classroomForm")?.addEventListener("submit", async event => {
     const capacity = Number($("roomCapacity")?.value);
     const imageFile = $("roomImage")?.files?.[0];
 
-    if (!name || !building || !Number.isFinite(capacity) || capacity <= 0) {
+    if (
+        !name ||
+        !building ||
+        !Number.isFinite(capacity) ||
+        capacity <= 0
+    ) {
         notify("Enter a classroom name, building, and valid capacity.", "error");
         return;
     }
 
-    let imageUrl = null;
-
     try {
+        let imageUrl = null;
+
         if (imageFile) {
-            const safeName = imageFile.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+            const safeName = imageFile.name.replace(
+                /[^a-zA-Z0-9._-]/g,
+                "_"
+            );
+
             const filePath = `${Date.now()}-${safeName}`;
 
             const { error: uploadError } = await db.storage
                 .from("classroom-images")
-                .upload(filePath, imageFile, {
-                    upsert: false
-                });
+                .upload(filePath, imageFile);
 
             if (uploadError) throw uploadError;
 
@@ -1091,7 +1037,6 @@ $("classroomForm")?.addEventListener("submit", async event => {
         $("classroomForm").reset();
 
         notify("Classroom added successfully.", "success");
-
         await refreshDashboard();
     } catch (error) {
         notify(friendlyError(error), "error");
@@ -1099,7 +1044,7 @@ $("classroomForm")?.addEventListener("submit", async event => {
 });
 
 /* =========================================================
-   ADMIN: ASSIGN ROLE AND PROGRAMME
+   ADMIN: ASSIGN ROLE
 ========================================================= */
 
 $("roleForm")?.addEventListener("submit", async event => {
@@ -1114,14 +1059,14 @@ $("roleForm")?.addEventListener("submit", async event => {
     const role = $("targetRole")?.value;
     const programId = $("targetProgram")?.value || null;
 
-    const validRoles = [
+    const allowedRoles = [
         "student",
         "class_rep",
         "lecturer",
         "admin"
     ];
 
-    if (!userId || !validRoles.includes(role)) {
+    if (!userId || !allowedRoles.includes(role)) {
         notify("Enter a valid user ID and role.", "error");
         return;
     }
@@ -1140,7 +1085,7 @@ $("roleForm")?.addEventListener("submit", async event => {
 
         if (!data?.length) {
             notify(
-                "No profile was updated. Check the user ID and your database permissions.",
+                "No profile was updated. Check the user ID and database permissions.",
                 "error"
             );
             return;
@@ -1155,15 +1100,12 @@ $("roleForm")?.addEventListener("submit", async event => {
 });
 
 /* =========================================================
-   SEARCH AND FILTER EVENTS
+   SEARCH AND FILTERS
 ========================================================= */
 
 $("roomSearch")?.addEventListener("input", renderRooms);
-
 $("roomStatusFilter")?.addEventListener("change", renderRooms);
-
 $("postSearch")?.addEventListener("input", renderPosts);
-
 $("postStatusFilter")?.addEventListener("change", renderPosts);
 
 $("refreshButton")?.addEventListener("click", async () => {
@@ -1172,58 +1114,29 @@ $("refreshButton")?.addEventListener("click", async () => {
 });
 
 /* =========================================================
-   HIDE THE OLD MANUAL START-TIME FIELD
-   The application records the current time automatically.
+   HIDE OLD MANUAL START-TIME FIELD
 ========================================================= */
 
 function hideManualStartTime() {
-    const startInput = $("postStart");
-    const startLabel = document.querySelector('label[for="postStart"]');
+    const input = $("postStart");
+    const label = document.querySelector('label[for="postStart"]');
 
-    if (startInput) {
-        startInput.required = false;
-        startInput.hidden = true;
+    if (input) {
+        input.required = false;
+        input.hidden = true;
     }
 
-    if (startLabel) {
-        startLabel.hidden = true;
-    }
+    if (label) label.hidden = true;
 }
 
 /* =========================================================
-   AUTOMATIC REFRESH
-   Recalculates lecture status as time passes.
+   REALTIME CONNECTION
+   This function creates only ONE channel.
 ========================================================= */
-
-async function refreshLiveStatus() {
-    if (!currentUser || refreshInProgress) return;
-
-    await refreshDashboard();
-}
-
-/*
-  The timer makes expired lectures change to "past" and their
-  classrooms change back to "Available" without manual refresh.
-*/
-
-window.setInterval(() => {
-    if (!currentUser || refreshInProgress) return;
-
-    renderRooms();
-    renderPosts();
-    renderOverview();
-}, 15000);
-
-/*
-  Supabase Realtime refreshes the page when another user
-  inserts, updates, or cancels a lecture.
-*/
-
-let realtimeChannel = null;
 
 function startRealtimeUpdates() {
     if (realtimeChannel) {
-        db.removeChannel(realtimeChannel);
+        return;
     }
 
     realtimeChannel = db
@@ -1235,16 +1148,7 @@ function startRealtimeUpdates() {
                 schema: "public",
                 table: "lecture_posts"
             },
-            () => {
-                if (refreshTimer) {
-                    window.clearTimeout(refreshTimer);
-                }
-
-                refreshTimer = window.setTimeout(
-                    refreshLiveStatus,
-                    500
-                );
-            }
+            () => scheduleLiveRefresh()
         )
         .on(
             "postgres_changes",
@@ -1253,21 +1157,50 @@ function startRealtimeUpdates() {
                 schema: "public",
                 table: "classrooms"
             },
-            () => {
-                if (refreshTimer) {
-                    window.clearTimeout(refreshTimer);
-                }
-
-                refreshTimer = window.setTimeout(
-                    refreshLiveStatus,
-                    500
-                );
-            }
+            () => scheduleLiveRefresh()
         )
         .subscribe(status => {
             console.log("Classroom Realtime status:", status);
+
+            if (
+                status === "CHANNEL_ERROR" ||
+                status === "TIMED_OUT"
+            ) {
+                console.error(
+                    "Realtime connection problem. Check your connection and Supabase Realtime settings."
+                );
+            }
         });
 }
+
+function scheduleLiveRefresh() {
+    if (refreshTimer) {
+        window.clearTimeout(refreshTimer);
+    }
+
+    refreshTimer = window.setTimeout(async () => {
+        refreshTimer = null;
+        await refreshLiveStatus();
+    }, 500);
+}
+
+async function refreshLiveStatus() {
+    if (!currentUser || refreshInProgress) return;
+
+    await refreshDashboard();
+}
+
+/* =========================================================
+   AUTOMATIC CLASSROOM STATUS UPDATES
+========================================================= */
+
+window.setInterval(() => {
+    if (!currentUser || refreshInProgress) return;
+
+    renderRooms();
+    renderPosts();
+    renderOverview();
+}, 15000);
 
 /* =========================================================
    APPLICATION STARTUP
@@ -1278,20 +1211,23 @@ async function startApp() {
     hideManualStartTime();
 
     try {
-        await loadPrograms();
-
         const { data, error } = await db.auth.getSession();
 
         if (error) throw error;
 
         currentUser = data.session?.user || null;
 
+        await loadPrograms();
+
         if (currentUser) {
+            await refreshDashboard();
             showDashboard();
             startRealtimeUpdates();
         } else {
             showAuth();
         }
+
+        authReady = true;
     } catch (error) {
         console.error("Application startup error:", error);
         showAuth();
@@ -1300,7 +1236,7 @@ async function startApp() {
 }
 
 /* =========================================================
-   AUTHENTICATION STATE CHANGES
+   AUTH STATE CHANGES
 ========================================================= */
 
 db.auth.onAuthStateChange((event, session) => {
@@ -1315,13 +1251,14 @@ db.auth.onAuthStateChange((event, session) => {
         profile = null;
         posts = [];
         classrooms = [];
-        showAuth();
 
         if (realtimeChannel) {
-            db.removeChannel(realtimeChannel);
+            const oldChannel = realtimeChannel;
             realtimeChannel = null;
+            db.removeChannel(oldChannel);
         }
 
+        showAuth();
         return;
     }
 
@@ -1330,26 +1267,19 @@ db.auth.onAuthStateChange((event, session) => {
         ["SIGNED_IN", "INITIAL_SESSION", "USER_UPDATED"].includes(event)
     ) {
         /*
-          Defer database work to avoid doing additional Supabase
-          requests directly inside the auth callback.
+          Wait until startup has finished to avoid duplicate
+          initial loads and duplicate Realtime subscriptions.
         */
+        if (!authReady && event === "INITIAL_SESSION") {
+            return;
+        }
+
         window.setTimeout(async () => {
             if (!currentUser) return;
 
             try {
-                await loadPrograms();
-                await loadProfile();
-                await loadClassrooms();
-                await loadPosts();
-
-                renderRooms();
-                renderPosts();
-                renderOverview();
-
-                setVisible($("authSection"), false);
-                setVisible($("resetPasswordSection"), false);
-                setVisible($("dashboard"), true);
-
+                await refreshDashboard();
+                showDashboard();
                 startRealtimeUpdates();
             } catch (error) {
                 console.error("Authentication update error:", error);
@@ -1359,7 +1289,6 @@ db.auth.onAuthStateChange((event, session) => {
     }
 });
 
-/* Start the application */
+/* Run the application */
 startApp();
-
 
