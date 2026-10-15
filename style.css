@@ -1178,4 +1178,65 @@ input[type="file"] {
     }
 }
 
+
+
+/* CLASSROOM DISPLAY FIX */
+.room-grid {
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    gap: 24px !important;
+    align-items: start !important;
+    width: 100% !important;
 }
+
+.room-grid > .classroom-card {
+    display: flex !important;
+    flex-direction: column !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    height: auto !important;
+    overflow: hidden !important;
+    background: #ffffff !important;
+    border: 1px solid #dfe5ee !important;
+    border-radius: 14px !important;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08) !important;
+}
+
+.room-grid > .classroom-card > img {
+    display: block !important;
+    width: 100% !important;
+    height: 200px !important;
+    max-width: 100% !important;
+    object-fit: cover !important;
+    flex-shrink: 0 !important;
+}
+
+.room-grid .classroom-card-content {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 10px !important;
+    padding: 18px !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    box-sizing: border-box !important;
+}
+
+.room-grid .classroom-card-content h3,
+.room-grid .classroom-card-content p {
+    margin: 0 !important;
+    overflow-wrap: anywhere !important;
+}
+
+@media (max-width: 900px) {
+    .room-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    }
+}
+
+@media (max-width: 560px) {
+    .room-grid {
+        grid-template-columns: 1fr !important;
+    }
+}
+
