@@ -65,10 +65,19 @@
                     <input id="loginEmail" name="email" type="email"
                            placeholder="you@example.com" autocomplete="email" required>
 
-                    <label for="loginPassword">Password</label>
-                    <input id="loginPassword" name="password" type="password"
-                           placeholder="Enter your password"
-                           autocomplete="current-password" required>
+                    
+<label for="loginPassword">Password</label>
+
+<div class="password-container">
+    <input id="loginPassword" name="password" type="password"
+           placeholder="Enter your password"
+           autocomplete="current-password" required>
+
+    <button type="button" id="toggleLoginPassword"
+            class="toggle-password">
+        Show
+    </button>
+</div>
 
                     <button class="button button-primary button-full" type="submit">
                         Sign in
