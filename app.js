@@ -133,6 +133,7 @@ function showAuth() {
     setVisible($("resetPasswordSection"), false);
     setVisible($("dashboard"), false);
     setVisible($("logoutButton"), false);
+    showAuthView("login");
 }
 
 function showResetPassword() {
@@ -388,6 +389,16 @@ function formatDateTime(value) {
         : date.toLocaleString();
 }
 
+function formatDuration(value) {
+    const minutes = Number(value);
+    if (!Number.isFinite(minutes) || minutes <= 0) return "Not specified";
+    const hours = Math.floor(minutes / 60);
+    const remainder = minutes % 60;
+    if (!hours) return `${remainder} min`;
+    if (!remainder) return `${hours} ${hours === 1 ? "hour" : "hours"}`;
+    return `${hours} ${hours === 1 ? "hour" : "hours"} ${remainder} min`;
+}
+
 /* =========================================================
    AVAILABLE CLASSROOM DROPDOWN
 ========================================================= */
@@ -547,7 +558,7 @@ function renderPosts() {
                 <p><strong>Building:</strong> ${escapeHTML(room.building || "Not specified")}</p>
                 <p><strong>Programme:</strong> ${escapeHTML(program.name || "Not specified")}</p>
                 <p><strong>Started:</strong> ${escapeHTML(formatDateTime(post.start_time))}</p>
-                <p><strong>Duration:</strong> ${escapeHTML(post.duration_minutes)} minutes</p>
+                <p><strong>Duration:</strong> ${escapeHTML(formatDuration(post.duration_minutes))}</p>
                 <p><strong>Expected end:</strong> ${escapeHTML(formatDateTime(getPostEndTime(post)))}</p>
 
                 ${cancelButton}
@@ -926,7 +937,8 @@ $("logoutButton")?.addEventListener("click", async () => {
 
 /* =========================================================
    POST LECTURE
-   Start time is automatically set to NOW.
+   Select a start date/time; duration is entered in hours.
+   Database compatibility is preserved using duration_minutes.
 ========================================================= */
 
 $("postForm")?.addEventListener("submit", async event => {
@@ -945,18 +957,25 @@ $("postForm")?.addEventListener("submit", async event => {
     const title = $("postTitle")?.value.trim();
     const details = $("postDetails")?.value.trim() || "";
     const roomId = $("postRoom")?.value;
-    const duration = Number($("postDuration")?.value);
+    const startValue = $("postStart")?.value;
+    const durationHours = Number($("postDuration")?.value);
+    const durationMinutes = durationHours * 60;
 
-    if (
-        !title ||
-        !roomId ||
-        !Number.isFinite(duration) ||
-        duration <= 0
-    ) {
-        notify(
-            "Enter a title, select a classroom, and enter a valid duration.",
-            "error"
-        );
+    if (!title || !roomId || !startValue || !Number.isFinite(durationHours) || durationHours < 0.25 || durationHours > 24) {
+        notify("Enter a title, select a classroom, choose the lecture date and time, and enter a duration from 0.25 to 24 hours.", "error");
+        return;
+    }
+
+    // datetime-local values are interpreted in the browser's local timezone.
+    const start = new Date(startValue);
+    if (Number.isNaN(start.getTime())) {
+        notify("Please choose a valid lecture date and time.", "error");
+        return;
+    }
+    const startMs = start.getTime();
+    const endMs = startMs + durationMinutes * 60000;
+    if (endMs <= Date.now()) {
+        notify("This lecture would already have ended. Choose a future end time.", "error");
         return;
     }
 
@@ -965,16 +984,7 @@ $("postForm")?.addEventListener("submit", async event => {
         return;
     }
 
-    if (roomIsOccupied(roomId)) {
-        notify("That classroom is already occupied.", "error");
-        await refreshDashboard();
-        return;
-    }
-
-    const start = new Date();
-    const startMs = start.getTime();
-    const endMs = startMs + duration * 60000;
-
+    // Validate the room against the selected lecture time, not only its status right now.
     const overlap = posts.some(post => {
         if (
             post.cancelled ||
@@ -1018,7 +1028,7 @@ $("postForm")?.addEventListener("submit", async event => {
                 title,
                 details,
                 start_time: start.toISOString(),
-                duration_minutes: duration,
+                duration_minutes: durationMinutes,
                 cancelled: false
             });
 
@@ -1236,18 +1246,12 @@ $("refreshButton")?.addEventListener("click", async () => {
 ========================================================= */
 
 function hideManualStartTime() {
+    // Retain the original startup call, but keep the scheduling field visible.
     const input = $("postStart");
-    const label = document.querySelector('label[for="postStart"]');
-
     if (input) {
-        input.required = false;
-        input.hidden = true;
-        input.style.display = "none";
-    }
-
-    if (label) {
-        label.hidden = true;
-        label.style.display = "none";
+        input.hidden = false;
+        input.style.removeProperty("display");
+        input.required = true;
     }
 }
 
@@ -1392,16 +1396,40 @@ async function startApp() {
     }
 }
 
-document.getElementById("toggleLoginPassword").addEventListener("click", function () {
-    const password = document.getElementById("loginPassword");
+function showAuthView(view) {
+    const signup = view === "signup";
+    setVisible($("loginForm"), !signup);
+    setVisible($("signupForm"), signup);
+    setVisible($("authHeading"), !signup);
+    setVisible($("signupHeading"), signup);
+    setVisible($("goToSignup"), !signup);
+    setVisible($("goToLogin"), signup);
+}
 
-    if (password.type === "password") {
-        password.type = "text";
-        this.textContent = "Hide";
-    } else {
-        password.type = "password";
-        this.textContent = "Show";
-    }
+$("goToSignup")?.addEventListener("click", event => {
+    event.preventDefault();
+    showAuthView("signup");
+});
+$("goToLogin")?.addEventListener("click", event => {
+    event.preventDefault();
+    showAuthView("login");
+});
+
+$("toggleLoginPassword")?.addEventListener("click", function () {
+    const input = $("loginPassword");
+    if (!input) return;
+    const show = input.type === "password";
+    input.type = show ? "text" : "password";
+    this.textContent = show ? "Hide" : "Show";
+    this.setAttribute("aria-pressed", String(show));
+});
+$("toggleSignupPassword")?.addEventListener("click", function () {
+    const input = $("signupPassword");
+    if (!input) return;
+    const show = input.type === "password";
+    input.type = show ? "text" : "password";
+    this.textContent = show ? "Hide" : "Show";
+    this.setAttribute("aria-pressed", String(show));
 });
 
 startApp();
