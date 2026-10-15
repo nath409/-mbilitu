@@ -1392,4 +1392,16 @@ async function startApp() {
     }
 }
 
+document.getElementById("toggleLoginPassword").addEventListener("click", function () {
+    const password = document.getElementById("loginPassword");
+
+    if (password.type === "password") {
+        password.type = "text";
+        this.textContent = "Hide";
+    } else {
+        password.type = "password";
+        this.textContent = "Show";
+    }
+});
+
 startApp();
