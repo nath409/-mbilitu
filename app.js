@@ -21,6 +21,9 @@ let clockTimer = null;
 let refreshInProgress = false;
 let dashboardLoading = false;
 let authReady = false;
+let currentPageId = "overviewPage";
+let pageHistory = [];
+let lastRealtimeNoticeAt = 0;
 
 const $ = id => document.getElementById(id);
 
@@ -517,6 +520,9 @@ function renderPosts() {
         `.toLowerCase();
 
         const status = getPostStatus(post);
+        const endMs = getPostEndTime(post).getTime();
+        // Expired lectures are hidden immediately, even before database cleanup runs.
+        if (Number.isFinite(endMs) && endMs <= Date.now()) return false;
 
         return text.includes(search) &&
             (filter === "all" || status === filter);
@@ -571,6 +577,41 @@ function renderPosts() {
             cancelPost(button.dataset.cancelPost);
         });
     });
+
+    renderNotifications();
+}
+
+/* =========================================================
+   NOTIFICATIONS
+========================================================= */
+function renderNotifications() {
+    const container = $("notificationsList");
+    const badge = $("notificationBadge");
+    if (!container) return;
+
+    const items = posts
+        .filter(post => {
+            const endMs = getPostEndTime(post).getTime();
+            return Number.isFinite(endMs) && endMs > Date.now();
+        })
+        .sort((a, b) => new Date(a.start_time) - new Date(b.start_time))
+        .slice(0, 12);
+
+    if (badge) {
+        badge.textContent = String(items.length);
+        badge.hidden = items.length === 0;
+    }
+
+    container.innerHTML = items.map(post => {
+        const status = getPostStatus(post);
+        const title = post.cancelled ? "Lecture cancelled" : status === "active" ? "Lecture in progress" : "Upcoming lecture";
+        return `<article class="notification-card">
+            <span class="notification-icon" aria-hidden="true">${post.cancelled ? "!" : status === "active" ? "▶" : "◷"}</span>
+            <div class="notification-body"><div class="notification-title-row"><h3>${escapeHTML(title)}</h3><span class="status ${escapeHTML(status)}">${escapeHTML(status.toUpperCase())}</span></div>
+            <p><strong>${escapeHTML(post.title || "Lecture")}</strong> — ${escapeHTML(post.classrooms?.name || "Classroom not specified")}</p>
+            <p class="muted">${escapeHTML(formatDateTime(post.start_time))}${post.cancelled ? " · This lecture has been cancelled." : ""}</p></div>
+        </article>`;
+    }).join("") || '<p class="empty-state">There are no current or upcoming lecture updates.</p>';
 }
 
 /* =========================================================
@@ -626,54 +667,59 @@ function renderOverview() {
 }
 
 /* =========================================================
-   NAVIGATION — FIXED TO MATCH index.html
+   NAVIGATION AND BACK BUTTONS
 ========================================================= */
-
-function showPage(pageName) {
+function showPage(pageName, remember = true) {
     if (!pageName) return;
-
-    // Accept both "overview" and "overviewPage".
-    const pageId = String(pageName).endsWith("Page")
-        ? String(pageName)
-        : `${pageName}Page`;
-
+    const pageId = String(pageName).endsWith("Page") ? String(pageName) : `${pageName}Page`;
     const target = $(pageId);
-
-    // Only activate real dashboard page sections.
     if (!target || !target.classList.contains("page")) {
         console.warn("Navigation page not found:", pageId);
         return;
     }
 
-    // Hide all dashboard pages and show the selected page.
+    if (remember && currentPageId && currentPageId !== pageId) {
+        pageHistory.push(currentPageId);
+        if (pageHistory.length > 20) pageHistory.shift();
+    }
+    currentPageId = pageId;
+
     document.querySelectorAll("#dashboard .page").forEach(page => {
         page.classList.toggle("active", page.id === pageId);
     });
-
-    // Highlight the selected navigation button.
     document.querySelectorAll(".nav-item[data-page]").forEach(button => {
-        button.classList.toggle(
-            "active",
-            button.dataset.page === pageId
-        );
+        button.classList.toggle("active", button.dataset.page === pageId);
     });
+
+    // Add a contextual back button to every page except Overview.
+    document.querySelectorAll(".page-back").forEach(button => button.remove());
+    if (pageId !== "overviewPage") {
+        const back = document.createElement("button");
+        back.type = "button";
+        back.className = "button button-outline button-small page-back";
+        back.textContent = "← Back";
+        back.setAttribute("aria-label", "Go back to the previous section");
+        back.addEventListener("click", goBackPage);
+        target.prepend(back);
+    }
+    if (pageId === "notificationsPage") renderNotifications();
+    if (window.matchMedia && window.matchMedia("(max-width: 850px)").matches) {
+        target.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
 }
 
-// Allow the HTML brand link to call showPage().
+function goBackPage() {
+    const previous = pageHistory.pop();
+    showPage(previous && $(previous) ? previous : "overviewPage", false);
+}
 window.showPage = showPage;
+window.goBackPage = goBackPage;
 
-// Connect Overview, Classrooms, Announcements, Administration and My account.
 document.querySelectorAll(".nav-item[data-page]").forEach(button => {
-    button.addEventListener("click", () => {
-        showPage(button.dataset.page);
-    });
+    button.addEventListener("click", () => showPage(button.dataset.page));
 });
-
-// Connect "View all" buttons on the overview page.
 document.querySelectorAll("[data-go-page]").forEach(button => {
-    button.addEventListener("click", () => {
-        showPage(button.dataset.goPage);
-    });
+    button.addEventListener("click", () => showPage(button.dataset.goPage));
 });
 
 /* =========================================================
@@ -974,8 +1020,12 @@ $("postForm")?.addEventListener("submit", async event => {
     }
     const startMs = start.getTime();
     const endMs = startMs + durationMinutes * 60000;
-    if (endMs <= Date.now()) {
-        notify("This lecture would already have ended. Choose a future end time.", "error");
+    if (startMs <= Date.now()) {
+        notify("Lectures must be scheduled to start in the future. Choose a later date and time.", "error");
+        return;
+    }
+    if (endMs <= startMs) {
+        notify("The lecture end time must be after its start time.", "error");
         return;
     }
 
@@ -1296,7 +1346,16 @@ function startRealtimeUpdates() {
         });
 }
 
-function scheduleLiveRefresh() {
+function scheduleLiveRefresh(payload) {
+    const now = Date.now();
+    if (payload && now - lastRealtimeNoticeAt > 8000) {
+        lastRealtimeNoticeAt = now;
+        const row = payload.new || payload.old || {};
+        const title = row.title ? `Lecture update: ${row.title}` : "Campus information has been updated";
+        if (localStorage.getItem("mukuba-browser-notifications") === "enabled" && "Notification" in window && Notification.permission === "granted") {
+            try { new Notification("Mukuba University", { body: title }); } catch (_) {}
+        }
+    }
     if (refreshTimer) {
         window.clearTimeout(refreshTimer);
     }
@@ -1432,4 +1491,57 @@ $("toggleSignupPassword")?.addEventListener("click", function () {
     this.setAttribute("aria-pressed", String(show));
 });
 
+/* =========================================================
+   THEME AND USER PREFERENCES
+========================================================= */
+function applyTheme(theme, announce = false) {
+    const selected = theme === "dark" ? "dark" : "light";
+    document.body.dataset.theme = selected;
+    localStorage.setItem("mukuba-theme", selected);
+    const toggle = $("darkModeToggle");
+    if (toggle) toggle.checked = selected === "dark";
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.content = selected === "dark" ? "#101827" : "#123b70";
+    if (announce) notify(`${selected === "dark" ? "Dark" : "Light"} mode enabled.`, "success");
+}
+
+function loadPreferences() {
+    applyTheme(localStorage.getItem("mukuba-theme") || "light");
+    const enabled = localStorage.getItem("mukuba-browser-notifications") === "enabled";
+    const button = $("enableBrowserNotifications");
+    if (button) button.textContent = enabled ? "Notifications enabled" : "Enable notifications";
+}
+
+$("darkModeToggle")?.addEventListener("change", event => {
+    applyTheme(event.target.checked ? "dark" : "light", true);
+});
+
+$("enableBrowserNotifications")?.addEventListener("click", async () => {
+    if (!("Notification" in window)) {
+        notify("This browser does not support desktop notifications. You can still view updates on the Notifications page.", "error");
+        return;
+    }
+    try {
+        const permission = Notification.permission === "default" ? await Notification.requestPermission() : Notification.permission;
+        if (permission === "granted") {
+            localStorage.setItem("mukuba-browser-notifications", "enabled");
+            $("enableBrowserNotifications").textContent = "Notifications enabled";
+            notify("Browser notifications are enabled on this device.", "success");
+        } else {
+            localStorage.setItem("mukuba-browser-notifications", "disabled");
+            notify("Browser notifications were not allowed. You can change this in your browser settings.", "info");
+        }
+    } catch (error) {
+        notify("Could not enable browser notifications in this browser.", "error");
+    }
+});
+
+$("resetPreferences")?.addEventListener("click", () => {
+    localStorage.removeItem("mukuba-theme");
+    localStorage.removeItem("mukuba-browser-notifications");
+    loadPreferences();
+    notify("Display preferences have been reset.", "success");
+});
+
+loadPreferences();
 startApp();
