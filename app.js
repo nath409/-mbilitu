@@ -504,86 +504,172 @@ function renderRooms() {
    RENDER ANNOUNCEMENTS
 ========================================================= */
 
+function postMatchesSearch(post, search) {
+    const text = `${post.title || ""} ${post.details || ""} ${post.classrooms?.name || ""} ${post.programs?.name || ""}`.toLowerCase();
+    return text.includes(search);
+}
+
+function localDateKey(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+}
+
+function getTimetableRange() {
+    const mode = $("scheduleRange")?.value || "all";
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const end = new Date(start);
+    if (mode === "today") {
+        end.setDate(end.getDate() + 1);
+    } else if (mode === "week") {
+        const day = (start.getDay() + 6) % 7;
+        start.setDate(start.getDate() - day);
+        end.setTime(start.getTime());
+        end.setDate(end.getDate() + 7);
+    } else if (mode === "date") {
+        const value = $("scheduleDate")?.value;
+        if (!value) return { mode, start: null, end: null };
+        const [year, month, day] = value.split("-").map(Number);
+        const selected = new Date(year, month - 1, day);
+        return { mode, start: selected, end: new Date(year, month - 1, day + 1) };
+    }
+    return { mode, start: mode === "all" ? null : start, end: mode === "all" ? null : end };
+}
+
+function renderTimetable() {
+    const container = $("timetableList");
+    if (!container) return;
+    const range = getTimetableRange();
+    if (range.mode === "date" && !range.start) {
+        container.innerHTML = '<p class="empty-state">Choose a date to view its lectures.</p>';
+        return;
+    }
+    const search = ($("postSearch")?.value || "").toLowerCase();
+    const filtered = posts.filter(post => {
+        if (!postMatchesSearch(post, search)) return false;
+        const start = new Date(post.start_time);
+        if (Number.isNaN(start.getTime())) return false;
+        if (range.start && start < range.start) return false;
+        if (range.end && start >= range.end) return false;
+        return true;
+    }).sort((a, b) => new Date(a.start_time) - new Date(b.start_time));
+
+    if (!filtered.length) {
+        container.innerHTML = '<p class="empty-state">No lectures are scheduled for this date range.</p>';
+        return;
+    }
+    container.innerHTML = filtered.map(post => {
+        const status = getPostStatus(post);
+        return `<article class="timetable-item ${post.cancelled ? "is-cancelled" : ""}">
+            <div class="timetable-time"><strong>${escapeHTML(new Date(post.start_time).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"}))}</strong><span>${escapeHTML(new Date(post.start_time).toLocaleDateString([], {day:"numeric", month:"short"}))}</span></div>
+            <div class="timetable-main"><h4>${escapeHTML(post.title || "Lecture")}</h4><p>${escapeHTML(post.classrooms?.name || "Unknown classroom")} · ${escapeHTML(post.programs?.name || "Programme not specified")}</p><small>Ends ${escapeHTML(formatDateTime(getPostEndTime(post)))}</small></div>
+            <span class="status ${escapeHTML(status)}">${escapeHTML(status.toUpperCase())}</span>
+        </article>`;
+    }).join("");
+}
+
 function renderPosts() {
     const container = $("postsList");
     if (!container) return;
-
     const search = ($("postSearch")?.value || "").toLowerCase();
     const filter = $("postStatusFilter")?.value || "all";
-
     const filteredPosts = posts.filter(post => {
-        const text = `
-            ${post.title || ""}
-            ${post.details || ""}
-            ${post.classrooms?.name || ""}
-            ${post.programs?.name || ""}
-        `.toLowerCase();
-
         const status = getPostStatus(post);
         const endMs = getPostEndTime(post).getTime();
-        // Expired lectures are hidden immediately, even before database cleanup runs.
         if (Number.isFinite(endMs) && endMs <= Date.now()) return false;
-
-        return text.includes(search) &&
-            (filter === "all" || status === filter);
+        return postMatchesSearch(post, search) && (filter === "all" || status === filter);
     });
-
     if (!filteredPosts.length) {
-        container.innerHTML =
-            `<p class="empty-state">No announcements found.</p>`;
-        return;
+        container.innerHTML = '<p class="empty-state">No announcements found.</p>';
+    } else {
+        container.innerHTML = filteredPosts.map(post => {
+            const status = getPostStatus(post);
+            const room = post.classrooms || {};
+            const program = post.programs || {};
+            const canManage = isAdmin() || post.posted_by === currentUser?.id;
+            const editButton = canManage && !post.cancelled && status !== "past"
+                ? `<button type="button" class="button button-outline" data-edit-post="${escapeHTML(post.id)}">Edit lecture</button>` : "";
+            const cancelButton = canManage && !post.cancelled && status !== "past"
+                ? `<button type="button" class="button button-danger" data-cancel-post="${escapeHTML(post.id)}">Cancel lecture</button>` : "";
+            return `<article class="announcement-card"><div class="announcement-header"><h3>${escapeHTML(post.title || "Lecture announcement")}</h3><span class="status ${escapeHTML(status)}">${escapeHTML(status.toUpperCase())}</span></div>
+                <p>${escapeHTML(post.details || "No additional details.")}</p><p><strong>Classroom:</strong> ${escapeHTML(room.name || "Unknown")}</p><p><strong>Building:</strong> ${escapeHTML(room.building || "Not specified")}</p><p><strong>Programme:</strong> ${escapeHTML(program.name || "Not specified")}</p><p><strong>Starts:</strong> ${escapeHTML(formatDateTime(post.start_time))}</p><p><strong>Duration:</strong> ${escapeHTML(formatDuration(post.duration_minutes))}</p><p><strong>Expected end:</strong> ${escapeHTML(formatDateTime(getPostEndTime(post)))}</p><div class="lecture-actions">${editButton}${cancelButton}</div></article>`;
+        }).join("");
     }
-
-    container.innerHTML = filteredPosts.map(post => {
-        const status = getPostStatus(post);
-        const room = post.classrooms || {};
-        const program = post.programs || {};
-
-        const canCancel =
-            isAdmin() || post.posted_by === currentUser?.id;
-
-        const cancelButton =
-            canCancel && !post.cancelled && status !== "past"
-                ? `<button type="button"
-                           data-cancel-post="${escapeHTML(post.id)}">
-                       Cancel lecture
-                   </button>`
-                : "";
-
-        return `
-            <article class="announcement-card">
-                <div class="announcement-header">
-                    <h3>${escapeHTML(post.title || "Lecture announcement")}</h3>
-                    <span class="status ${escapeHTML(status)}">
-                        ${escapeHTML(status.toUpperCase())}
-                    </span>
-                </div>
-
-                <p>${escapeHTML(post.details || "No additional details.")}</p>
-                <p><strong>Classroom:</strong> ${escapeHTML(room.name || "Unknown")}</p>
-                <p><strong>Building:</strong> ${escapeHTML(room.building || "Not specified")}</p>
-                <p><strong>Programme:</strong> ${escapeHTML(program.name || "Not specified")}</p>
-                <p><strong>Started:</strong> ${escapeHTML(formatDateTime(post.start_time))}</p>
-                <p><strong>Duration:</strong> ${escapeHTML(formatDuration(post.duration_minutes))}</p>
-                <p><strong>Expected end:</strong> ${escapeHTML(formatDateTime(getPostEndTime(post)))}</p>
-
-                ${cancelButton}
-            </article>
-        `;
-    }).join("");
-
-    container.querySelectorAll("[data-cancel-post]").forEach(button => {
-        button.addEventListener("click", () => {
-            cancelPost(button.dataset.cancelPost);
-        });
-    });
-
-    renderNotifications();
+    container.querySelectorAll("[data-cancel-post]").forEach(button => button.addEventListener("click", () => cancelPost(button.dataset.cancelPost)));
+    container.querySelectorAll("[data-edit-post]").forEach(button => button.addEventListener("click", () => openEditLecture(button.dataset.editPost)));
+    renderTimetable();
 }
 
-/* =========================================================
-   NOTIFICATIONS
-========================================================= */
+function toLocalDateTimeInput(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+    return local.toISOString().slice(0, 16);
+}
+
+function openEditLecture(postId) {
+    const post = posts.find(item => String(item.id) === String(postId));
+    if (!post) return notify("Lecture not found. Refresh and try again.", "error");
+    if (!isAdmin() && post.posted_by !== currentUser?.id) return notify("You cannot edit another user's lecture.", "error");
+    if (post.cancelled || getPostStatus(post) === "past") return notify("Past or cancelled lectures cannot be edited.", "error");
+    $("editPostId").value = post.id;
+    $("editPostTitle").value = post.title || "";
+    $("editPostDetails").value = post.details || "";
+    $("editPostStart").value = toLocalDateTimeInput(post.start_time);
+    $("editPostDuration").value = Number(post.duration_minutes || 60) / 60;
+    const roomSelect = $("editPostRoom");
+    roomSelect.replaceChildren(...classrooms.map(room => new Option(`${room.name} (${room.building || "Building not specified"})`, room.id)));
+    roomSelect.value = String(post.classroom_id);
+    $("editLectureModal").hidden = false;
+    document.body.classList.add("modal-open");
+}
+
+function closeEditLecture() {
+    if ($("editLectureModal")) $("editLectureModal").hidden = true;
+    document.body.classList.remove("modal-open");
+}
+
+$("closeEditLecture")?.addEventListener("click", closeEditLecture);
+$("editLectureModal")?.addEventListener("click", event => { if (event.target === $("editLectureModal")) closeEditLecture(); });
+$("editLectureForm")?.addEventListener("submit", async event => {
+    event.preventDefault();
+    const postId = $("editPostId").value;
+    const post = posts.find(item => String(item.id) === String(postId));
+    if (!post || (!isAdmin() && post.posted_by !== currentUser?.id)) return notify("You do not have permission to edit this lecture.", "error");
+    const title = $("editPostTitle").value.trim();
+    const details = $("editPostDetails").value.trim();
+    const roomId = $("editPostRoom").value;
+    const start = new Date($("editPostStart").value);
+    const hours = Number($("editPostDuration").value);
+    const minutes = Math.round(hours * 60);
+    if (!title || !roomId || !Number.isFinite(start.getTime()) || !Number.isFinite(hours) || hours < 0.25 || hours > 24) return notify("Check the title, classroom, date, time and duration.", "error");
+    if (start.getTime() <= Date.now()) return notify("Choose a future start time for the lecture.", "error");
+    const startMs = start.getTime(), endMs = startMs + minutes * 60000;
+    const conflict = posts.some(other => {
+        if (String(other.id) === String(postId) || other.cancelled || String(other.classroom_id) !== String(roomId)) return false;
+        const otherStart = new Date(other.start_time).getTime(), otherEnd = getPostEndTime(other).getTime();
+        return Number.isFinite(otherStart) && Number.isFinite(otherEnd) && startMs < otherEnd && endMs > otherStart;
+    });
+    if (conflict) return notify("This classroom already has a lecture overlapping that time. Choose another room or time.", "error");
+    const button = $("saveLectureChanges");
+    button.disabled = true;
+    try {
+        const { error } = await db.from("lecture_posts").update({
+            title, details, classroom_id: roomId, start_time: start.toISOString(), duration_minutes: minutes,
+            lecture_end_time: new Date(endMs).toISOString()
+        }).eq("id", postId);
+        if (error) throw error;
+        closeEditLecture();
+        notify("Lecture updated successfully.", "success");
+        await refreshDashboard();
+    } catch (error) {
+        notify(friendlyError(error), "error");
+        try { await refreshDashboard(); } catch (_) {}
+    } finally { button.disabled = false; }
+});
+
 function renderNotifications() {
     const container = $("notificationsList");
     const badge = $("notificationBadge");
@@ -1281,6 +1367,8 @@ $("roomSearch")?.addEventListener("input", renderRooms);
 $("roomStatusFilter")?.addEventListener("change", renderRooms);
 $("postSearch")?.addEventListener("input", renderPosts);
 $("postStatusFilter")?.addEventListener("change", renderPosts);
+$("scheduleRange")?.addEventListener("change", () => { const date = $("scheduleDate"); if (date) date.disabled = $("scheduleRange").value !== "date"; renderTimetable(); });
+$("scheduleDate")?.addEventListener("change", renderTimetable);
 
 $("refreshButton")?.addEventListener("click", async () => {
     try {
