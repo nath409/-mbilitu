@@ -14,6 +14,7 @@ let profile = null;
 let programs = [];
 let classrooms = [];
 let posts = [];
+let persistentNotifications = [];
 
 let realtimeChannel = null;
 let refreshTimer = null;
@@ -504,201 +505,187 @@ function renderRooms() {
    RENDER ANNOUNCEMENTS
 ========================================================= */
 
-function postMatchesSearch(post, search) {
-    const text = `${post.title || ""} ${post.details || ""} ${post.classrooms?.name || ""} ${post.programs?.name || ""}`.toLowerCase();
-    return text.includes(search);
-}
-
-function localDateKey(date) {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const day = String(date.getDate()).padStart(2, "0");
-    return `${year}-${month}-${day}`;
-}
-
-function getTimetableRange() {
-    const mode = $("scheduleRange")?.value || "all";
-    const now = new Date();
-    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const end = new Date(start);
-    if (mode === "today") {
-        end.setDate(end.getDate() + 1);
-    } else if (mode === "week") {
-        const day = (start.getDay() + 6) % 7;
-        start.setDate(start.getDate() - day);
-        end.setTime(start.getTime());
-        end.setDate(end.getDate() + 7);
-    } else if (mode === "date") {
-        const value = $("scheduleDate")?.value;
-        if (!value) return { mode, start: null, end: null };
-        const [year, month, day] = value.split("-").map(Number);
-        const selected = new Date(year, month - 1, day);
-        return { mode, start: selected, end: new Date(year, month - 1, day + 1) };
-    }
-    return { mode, start: mode === "all" ? null : start, end: mode === "all" ? null : end };
-}
-
-function renderTimetable() {
-    const container = $("timetableList");
-    if (!container) return;
-    const range = getTimetableRange();
-    if (range.mode === "date" && !range.start) {
-        container.innerHTML = '<p class="empty-state">Choose a date to view its lectures.</p>';
-        return;
-    }
-    const search = ($("postSearch")?.value || "").toLowerCase();
-    const filtered = posts.filter(post => {
-        if (!postMatchesSearch(post, search)) return false;
-        const start = new Date(post.start_time);
-        if (Number.isNaN(start.getTime())) return false;
-        if (range.start && start < range.start) return false;
-        if (range.end && start >= range.end) return false;
-        return true;
-    }).sort((a, b) => new Date(a.start_time) - new Date(b.start_time));
-
-    if (!filtered.length) {
-        container.innerHTML = '<p class="empty-state">No lectures are scheduled for this date range.</p>';
-        return;
-    }
-    container.innerHTML = filtered.map(post => {
-        const status = getPostStatus(post);
-        return `<article class="timetable-item ${post.cancelled ? "is-cancelled" : ""}">
-            <div class="timetable-time"><strong>${escapeHTML(new Date(post.start_time).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"}))}</strong><span>${escapeHTML(new Date(post.start_time).toLocaleDateString([], {day:"numeric", month:"short"}))}</span></div>
-            <div class="timetable-main"><h4>${escapeHTML(post.title || "Lecture")}</h4><p>${escapeHTML(post.classrooms?.name || "Unknown classroom")} · ${escapeHTML(post.programs?.name || "Programme not specified")}</p><small>Ends ${escapeHTML(formatDateTime(getPostEndTime(post)))}</small></div>
-            <span class="status ${escapeHTML(status)}">${escapeHTML(status.toUpperCase())}</span>
-        </article>`;
-    }).join("");
-}
-
 function renderPosts() {
     const container = $("postsList");
     if (!container) return;
+
     const search = ($("postSearch")?.value || "").toLowerCase();
     const filter = $("postStatusFilter")?.value || "all";
+
     const filteredPosts = posts.filter(post => {
+        const text = `
+            ${post.title || ""}
+            ${post.details || ""}
+            ${post.classrooms?.name || ""}
+            ${post.programs?.name || ""}
+        `.toLowerCase();
+
         const status = getPostStatus(post);
         const endMs = getPostEndTime(post).getTime();
+        // Expired lectures are hidden immediately, even before database cleanup runs.
         if (Number.isFinite(endMs) && endMs <= Date.now()) return false;
-        return postMatchesSearch(post, search) && (filter === "all" || status === filter);
+
+        return text.includes(search) &&
+            (filter === "all" || status === filter);
     });
+
     if (!filteredPosts.length) {
-        container.innerHTML = '<p class="empty-state">No announcements found.</p>';
-    } else {
-        container.innerHTML = filteredPosts.map(post => {
-            const status = getPostStatus(post);
-            const room = post.classrooms || {};
-            const program = post.programs || {};
-            const canManage = isAdmin() || post.posted_by === currentUser?.id;
-            const editButton = canManage && !post.cancelled && status !== "past"
-                ? `<button type="button" class="button button-outline" data-edit-post="${escapeHTML(post.id)}">Edit lecture</button>` : "";
-            const cancelButton = canManage && !post.cancelled && status !== "past"
-                ? `<button type="button" class="button button-danger" data-cancel-post="${escapeHTML(post.id)}">Cancel lecture</button>` : "";
-            return `<article class="announcement-card"><div class="announcement-header"><h3>${escapeHTML(post.title || "Lecture announcement")}</h3><span class="status ${escapeHTML(status)}">${escapeHTML(status.toUpperCase())}</span></div>
-                <p>${escapeHTML(post.details || "No additional details.")}</p><p><strong>Classroom:</strong> ${escapeHTML(room.name || "Unknown")}</p><p><strong>Building:</strong> ${escapeHTML(room.building || "Not specified")}</p><p><strong>Programme:</strong> ${escapeHTML(program.name || "Not specified")}</p><p><strong>Starts:</strong> ${escapeHTML(formatDateTime(post.start_time))}</p><p><strong>Duration:</strong> ${escapeHTML(formatDuration(post.duration_minutes))}</p><p><strong>Expected end:</strong> ${escapeHTML(formatDateTime(getPostEndTime(post)))}</p><div class="lecture-actions">${editButton}${cancelButton}</div></article>`;
-        }).join("");
+        container.innerHTML =
+            `<p class="empty-state">No announcements found.</p>`;
+        return;
     }
-    container.querySelectorAll("[data-cancel-post]").forEach(button => button.addEventListener("click", () => cancelPost(button.dataset.cancelPost)));
-    container.querySelectorAll("[data-edit-post]").forEach(button => button.addEventListener("click", () => openEditLecture(button.dataset.editPost)));
-    renderTimetable();
-}
 
-function toLocalDateTimeInput(value) {
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return "";
-    const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
-    return local.toISOString().slice(0, 16);
-}
+    container.innerHTML = filteredPosts.map(post => {
+        const status = getPostStatus(post);
+        const room = post.classrooms || {};
+        const program = post.programs || {};
 
-function openEditLecture(postId) {
-    const post = posts.find(item => String(item.id) === String(postId));
-    if (!post) return notify("Lecture not found. Refresh and try again.", "error");
-    if (!isAdmin() && post.posted_by !== currentUser?.id) return notify("You cannot edit another user's lecture.", "error");
-    if (post.cancelled || getPostStatus(post) === "past") return notify("Past or cancelled lectures cannot be edited.", "error");
-    $("editPostId").value = post.id;
-    $("editPostTitle").value = post.title || "";
-    $("editPostDetails").value = post.details || "";
-    $("editPostStart").value = toLocalDateTimeInput(post.start_time);
-    $("editPostDuration").value = Number(post.duration_minutes || 60) / 60;
-    const roomSelect = $("editPostRoom");
-    roomSelect.replaceChildren(...classrooms.map(room => new Option(`${room.name} (${room.building || "Building not specified"})`, room.id)));
-    roomSelect.value = String(post.classroom_id);
-    $("editLectureModal").hidden = false;
-    document.body.classList.add("modal-open");
-}
+        const canCancel =
+            isAdmin() || post.posted_by === currentUser?.id;
 
-function closeEditLecture() {
-    if ($("editLectureModal")) $("editLectureModal").hidden = true;
-    document.body.classList.remove("modal-open");
-}
+        const cancelButton =
+            canCancel && !post.cancelled && status !== "past"
+                ? `<button type="button"
+                           data-cancel-post="${escapeHTML(post.id)}">
+                       Cancel lecture
+                   </button>`
+                : "";
 
-$("closeEditLecture")?.addEventListener("click", closeEditLecture);
-$("editLectureModal")?.addEventListener("click", event => { if (event.target === $("editLectureModal")) closeEditLecture(); });
-$("editLectureForm")?.addEventListener("submit", async event => {
-    event.preventDefault();
-    const postId = $("editPostId").value;
-    const post = posts.find(item => String(item.id) === String(postId));
-    if (!post || (!isAdmin() && post.posted_by !== currentUser?.id)) return notify("You do not have permission to edit this lecture.", "error");
-    const title = $("editPostTitle").value.trim();
-    const details = $("editPostDetails").value.trim();
-    const roomId = $("editPostRoom").value;
-    const start = new Date($("editPostStart").value);
-    const hours = Number($("editPostDuration").value);
-    const minutes = Math.round(hours * 60);
-    if (!title || !roomId || !Number.isFinite(start.getTime()) || !Number.isFinite(hours) || hours < 0.25 || hours > 24) return notify("Check the title, classroom, date, time and duration.", "error");
-    if (start.getTime() <= Date.now()) return notify("Choose a future start time for the lecture.", "error");
-    const startMs = start.getTime(), endMs = startMs + minutes * 60000;
-    const conflict = posts.some(other => {
-        if (String(other.id) === String(postId) || other.cancelled || String(other.classroom_id) !== String(roomId)) return false;
-        const otherStart = new Date(other.start_time).getTime(), otherEnd = getPostEndTime(other).getTime();
-        return Number.isFinite(otherStart) && Number.isFinite(otherEnd) && startMs < otherEnd && endMs > otherStart;
+        return `
+            <article class="announcement-card">
+                <div class="announcement-header">
+                    <h3>${escapeHTML(post.title || "Lecture announcement")}</h3>
+                    <span class="status ${escapeHTML(status)}">
+                        ${escapeHTML(status.toUpperCase())}
+                    </span>
+                </div>
+
+                <p>${escapeHTML(post.details || "No additional details.")}</p>
+                <p><strong>Classroom:</strong> ${escapeHTML(room.name || "Unknown")}</p>
+                <p><strong>Building:</strong> ${escapeHTML(room.building || "Not specified")}</p>
+                <p><strong>Programme:</strong> ${escapeHTML(program.name || "Not specified")}</p>
+                <p><strong>Started:</strong> ${escapeHTML(formatDateTime(post.start_time))}</p>
+                <p><strong>Duration:</strong> ${escapeHTML(formatDuration(post.duration_minutes))}</p>
+                <p><strong>Expected end:</strong> ${escapeHTML(formatDateTime(getPostEndTime(post)))}</p>
+
+                ${cancelButton}
+            </article>
+        `;
+    }).join("");
+
+    container.querySelectorAll("[data-cancel-post]").forEach(button => {
+        button.addEventListener("click", () => {
+            cancelPost(button.dataset.cancelPost);
+        });
     });
-    if (conflict) return notify("This classroom already has a lecture overlapping that time. Choose another room or time.", "error");
-    const button = $("saveLectureChanges");
-    button.disabled = true;
-    try {
-        const { error } = await db.from("lecture_posts").update({
-            title, details, classroom_id: roomId, start_time: start.toISOString(), duration_minutes: minutes,
-            lecture_end_time: new Date(endMs).toISOString()
-        }).eq("id", postId);
-        if (error) throw error;
-        closeEditLecture();
-        notify("Lecture updated successfully.", "success");
-        await refreshDashboard();
-    } catch (error) {
-        notify(friendlyError(error), "error");
-        try { await refreshDashboard(); } catch (_) {}
-    } finally { button.disabled = false; }
-});
+
+}
+
+/* =========================================================
+   NOTIFICATIONS
+========================================================= */
+async function loadNotifications() {
+    if (!currentUser) {
+        persistentNotifications = [];
+        renderNotifications();
+        return;
+    }
+
+    const { data, error } = await db
+        .from("notifications")
+        .select("id, recipient_id, actor_id, lecture_post_id, title, message, type, is_read, created_at")
+        .eq("recipient_id", currentUser.id)
+        .order("created_at", { ascending: false })
+        .limit(100);
+
+    if (error) {
+        console.error("Could not load persistent notifications:", error);
+        const container = $("notificationsList");
+        if (container) {
+            container.innerHTML = '<p class="empty-state">Persistent notifications are not set up yet. Ask the administrator to run the Stage 4 SQL setup.</p>';
+        }
+        const badge = $("notificationBadge");
+        if (badge) badge.hidden = true;
+        return;
+    }
+
+    persistentNotifications = data || [];
+    renderNotifications();
+}
 
 function renderNotifications() {
     const container = $("notificationsList");
     const badge = $("notificationBadge");
+    const unreadCount = persistentNotifications.filter(item => !item.is_read).length;
+    if (badge) {
+        badge.textContent = String(unreadCount);
+        badge.hidden = unreadCount === 0;
+        badge.setAttribute("aria-label", `${unreadCount} unread notifications`);
+    }
     if (!container) return;
 
-    const items = posts
-        .filter(post => {
-            const endMs = getPostEndTime(post).getTime();
-            return Number.isFinite(endMs) && endMs > Date.now();
-        })
-        .sort((a, b) => new Date(a.start_time) - new Date(b.start_time))
-        .slice(0, 12);
+    const markAllButton = $("markAllNotificationsRead");
+    if (markAllButton) markAllButton.disabled = unreadCount === 0;
 
-    if (badge) {
-        badge.textContent = String(items.length);
-        badge.hidden = items.length === 0;
+    if (!persistentNotifications.length) {
+        container.innerHTML = '<p class="empty-state">You have no saved notifications yet. Updates about new, edited and cancelled lectures will appear here.</p>';
+        return;
     }
 
-    container.innerHTML = items.map(post => {
-        const status = getPostStatus(post);
-        const title = post.cancelled ? "Lecture cancelled" : status === "active" ? "Lecture in progress" : "Upcoming lecture";
-        return `<article class="notification-card">
-            <span class="notification-icon" aria-hidden="true">${post.cancelled ? "!" : status === "active" ? "▶" : "◷"}</span>
-            <div class="notification-body"><div class="notification-title-row"><h3>${escapeHTML(title)}</h3><span class="status ${escapeHTML(status)}">${escapeHTML(status.toUpperCase())}</span></div>
-            <p><strong>${escapeHTML(post.title || "Lecture")}</strong> — ${escapeHTML(post.classrooms?.name || "Classroom not specified")}</p>
-            <p class="muted">${escapeHTML(formatDateTime(post.start_time))}${post.cancelled ? " · This lecture has been cancelled." : ""}</p></div>
+    container.innerHTML = persistentNotifications.map(item => {
+        const type = String(item.type || "update").toLowerCase();
+        const icon = type === "cancelled" ? "!" : type === "posted" ? "+" : "↻";
+        const date = item.created_at ? formatDateTime(item.created_at) : "";
+        return `<article class="notification-card ${item.is_read ? "notification-read" : "notification-unread"}" data-notification-id="${escapeHTML(item.id)}">
+            <span class="notification-icon" aria-hidden="true">${icon}</span>
+            <div class="notification-body">
+                <div class="notification-title-row"><h3>${escapeHTML(item.title || "Lecture update")}</h3><span class="status ${item.is_read ? "past" : "upcoming"}">${item.is_read ? "READ" : "UNREAD"}</span></div>
+                <p>${escapeHTML(item.message || "Lecture information has changed.")}</p>
+                <p class="muted notification-date">${escapeHTML(date)}</p>
+                ${item.is_read ? "" : `<button class="text-button" type="button" data-mark-notification-read="${escapeHTML(item.id)}">Mark as read</button>`}
+            </div>
         </article>`;
-    }).join("") || '<p class="empty-state">There are no current or upcoming lecture updates.</p>';
+    }).join("");
 }
+
+async function markNotificationRead(notificationId) {
+    if (!currentUser) return;
+    const { error } = await db.from("notifications")
+        .update({ is_read: true })
+        .eq("id", notificationId)
+        .eq("recipient_id", currentUser.id);
+    if (error) {
+        console.error("Mark notification read error:", error);
+        notify("Could not mark this notification as read.", "error");
+        return;
+    }
+    persistentNotifications = persistentNotifications.map(item =>
+        String(item.id) === String(notificationId) ? { ...item, is_read: true } : item
+    );
+    renderNotifications();
+}
+
+async function markAllNotificationsRead() {
+    if (!currentUser) return;
+    const { error } = await db.from("notifications")
+        .update({ is_read: true })
+        .eq("recipient_id", currentUser.id)
+        .eq("is_read", false);
+    if (error) {
+        console.error("Mark all notifications read error:", error);
+        notify("Could not mark notifications as read.", "error");
+        return;
+    }
+    persistentNotifications = persistentNotifications.map(item => ({ ...item, is_read: true }));
+    renderNotifications();
+    notify("All notifications marked as read.", "success");
+}
+
+$("notificationsList")?.addEventListener("click", event => {
+    const button = event.target.closest("[data-mark-notification-read]");
+    if (button) markNotificationRead(button.dataset.markNotificationRead);
+});
+$("markAllNotificationsRead")?.addEventListener("click", markAllNotificationsRead);
 
 /* =========================================================
    RENDER DASHBOARD OVERVIEW
@@ -822,6 +809,7 @@ async function refreshDashboard() {
         await loadProfile();
         await loadClassrooms();
         await loadPosts();
+        await loadNotifications();
 
         renderRooms();
         renderPosts();
@@ -849,6 +837,7 @@ async function enterDashboard() {
         await loadProfile();
         await loadClassrooms();
         await loadPosts();
+        await loadNotifications();
 
         showDashboard();
 
@@ -1058,6 +1047,7 @@ $("logoutButton")?.addEventListener("click", async () => {
         currentUser = null;
         profile = null;
         posts = [];
+        persistentNotifications = [];
         classrooms = [];
 
         await stopRealtimeUpdates();
@@ -1367,8 +1357,6 @@ $("roomSearch")?.addEventListener("input", renderRooms);
 $("roomStatusFilter")?.addEventListener("change", renderRooms);
 $("postSearch")?.addEventListener("input", renderPosts);
 $("postStatusFilter")?.addEventListener("change", renderPosts);
-$("scheduleRange")?.addEventListener("change", () => { const date = $("scheduleDate"); if (date) date.disabled = $("scheduleRange").value !== "date"; renderTimetable(); });
-$("scheduleDate")?.addEventListener("change", renderTimetable);
 
 $("refreshButton")?.addEventListener("click", async () => {
     try {
@@ -1419,6 +1407,18 @@ function startRealtimeUpdates() {
                 table: "classrooms"
             },
             scheduleLiveRefresh
+        )
+        .on(
+            "postgres_changes",
+            {
+                event: "*",
+                schema: "public",
+                table: "notifications",
+                filter: `recipient_id=eq.${currentUser.id}`
+            },
+            () => {
+                window.setTimeout(() => loadNotifications().catch(error => console.error("Notification refresh error:", error)), 150);
+            }
         )
         .subscribe(status => {
             console.log("Classroom Realtime status:", status);
@@ -1497,6 +1497,7 @@ db.auth.onAuthStateChange((event, session) => {
         currentUser = null;
         profile = null;
         posts = [];
+        persistentNotifications = [];
         classrooms = [];
 
         stopRealtimeUpdates();
