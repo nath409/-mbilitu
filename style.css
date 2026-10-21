@@ -96,13 +96,195 @@ body[data-theme="dark"] .status.past, body[data-theme="dark"] .status.unknown { 
   .site-footer { overflow-wrap: anywhere; }
 }
 
+/* =========================================================
+   ACCOUNT MENU + MOBILE FIXED NAVIGATION
+   These overrides preserve the existing dashboard styling.
+========================================================= */
+.account-menu {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 10px;
+  background: var(--background);
+  border: 1px solid var(--line);
+  border-radius: 13px;
+}
+.account-menu-heading {
+  padding: 4px 10px 7px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1px;
+}
+.nav-item .nav-label {
+  width: auto;
+  text-align: inherit;
+}
+.account-menu .nav-item {
+  min-width: 0;
+}
+.account-menu .account-logout {
+  color: var(--red);
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 8px 8px;
+  margin-top: 4px;
+  padding-top: 14px;
+}
+.account-menu .account-logout:hover {
+  background: var(--red-light);
+  color: var(--red);
+}
+.password-change-card {
+  max-width: 620px;
+}
+.password-change-card .form-stack {
+  max-width: 100%;
+}
+body.dashboard-open {
+  padding-bottom: 0;
+}
+body[data-theme="dark"] .account-menu {
+  background: var(--surface);
+  border-color: var(--line);
+}
+body[data-theme="dark"] .account-menu .account-logout:hover {
+  background: #382321;
+}
 
-/* Stage 4: persistent notification history */
-.notification-card.notification-unread { border-left: 4px solid var(--blue, #1d5fbf); background: var(--blue-light, #eaf2ff); }
-.notification-card.notification-read { opacity: .88; }
-.notification-date { margin-bottom: 8px; }
-.notification-body .text-button { margin-top: 4px; }
-#markAllNotificationsRead:disabled { opacity: .55; cursor: not-allowed; }
-body[data-theme="dark"] .notification-card.notification-unread { background: rgba(60, 110, 190, .18); }
-
-
+@media (max-width: 850px) {
+  body.dashboard-open {
+    padding-bottom: calc(78px + env(safe-area-inset-bottom));
+  }
+  #dashboard .dashboard-layout {
+    display: block;
+    min-width: 0;
+  }
+  #dashboard .sidebar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1000;
+    width: 100%;
+    padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
+    background: var(--surface);
+    border-right: 0;
+    border-top: 1px solid var(--line);
+    box-shadow: 0 -8px 24px rgba(20, 47, 82, .12);
+    overflow: visible;
+  }
+  #dashboard .sidebar-label,
+  #dashboard .sidebar-help {
+    display: none;
+  }
+  #dashboard .sidebar-nav {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    align-items: stretch;
+    gap: 3px;
+    width: 100%;
+    min-width: 0;
+  }
+  #dashboard .sidebar-nav .nav-item {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    width: 100%;
+    min-width: 0;
+    min-height: 54px;
+    padding: 5px 2px;
+    border-radius: 10px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-align: center;
+    font-size: 10px;
+    line-height: 1.2;
+  }
+  #dashboard .sidebar-nav .nav-item > span:first-child {
+    display: block;
+    width: auto;
+    font-size: 18px;
+    line-height: 1.2;
+  }
+  #dashboard .sidebar-nav .nav-item .nav-label {
+    display: block;
+    width: auto;
+    max-width: 100%;
+    font-size: 10px;
+  }
+  #dashboard .sidebar-nav .nav-badge {
+    position: absolute;
+    top: 1px;
+    right: 10%;
+    min-width: 17px;
+    height: 17px;
+    margin: 0;
+    padding: 0 4px;
+    font-size: 9px;
+  }
+  #dashboard .account-menu {
+    position: absolute;
+    right: 8px;
+    bottom: calc(100% + 9px);
+    width: min(320px, calc(100vw - 16px));
+    max-height: min(65vh, 520px);
+    overflow-y: auto;
+    margin: 0;
+    padding: 10px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 15px;
+    box-shadow: 0 12px 35px rgba(20, 47, 82, .2);
+  }
+  #dashboard .account-menu .nav-item {
+    display: flex;
+    flex-direction: row;
+    justify-content: flex-start;
+    min-height: 46px;
+    padding: 10px 12px;
+    gap: 10px;
+    font-size: 13px;
+    text-align: left;
+  }
+  #dashboard .account-menu .nav-item > span:first-child {
+    width: 22px;
+    font-size: 17px;
+  }
+  #dashboard .account-menu .nav-item .nav-label {
+    font-size: 13px;
+  }
+  #dashboard .account-menu .account-logout {
+    margin-top: 4px;
+    padding-top: 12px;
+  }
+  #dashboard .dashboard-content {
+    width: 100%;
+    min-width: 0;
+    padding: 20px 16px 36px;
+    overflow: hidden;
+  }
+  #dashboard .page {
+    scroll-margin-top: 16px;
+  }
+}
+@media (max-width: 480px) {
+  #dashboard .sidebar {
+    padding-left: 5px;
+    padding-right: 5px;
+  }
+  #dashboard .sidebar-nav .nav-item {
+    min-height: 52px;
+    padding-left: 1px;
+    padding-right: 1px;
+  }
+  #dashboard .sidebar-nav .nav-item .nav-label {
+    font-size: 9px;
+  }
+  #dashboard .dashboard-content {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+}
