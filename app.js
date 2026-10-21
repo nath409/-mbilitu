@@ -1710,6 +1710,31 @@ $("resetPreferences")?.addEventListener("click", () => {
     loadPreferences();
     notify("Display preferences have been reset.", "success");
 });
+// Global Toast Notification Helper
+function showToast(message, type = 'success') {
+    let container = document.getElementById('toast-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'toast-container';
+        container.className = 'toast-container';
+        document.body.appendChild(container);
+    }
 
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    
+    // Icon based on type
+    let icon = '✓';
+    if (type === 'error') icon = '✕';
+    if (type === 'info') icon = 'ℹ';
+
+    toast.innerHTML = `<span style="font-weight:900; font-size:15px;">${icon}</span> <span>${message}</span>`;
+    container.appendChild(toast);
+
+    setTimeout(() => {
+        toast.style.animation = 'toastFadeOut .25s ease forwards';
+        setTimeout(() => toast.remove(), 250);
+    }, 3500);
+}
 loadPreferences();
 startApp();
