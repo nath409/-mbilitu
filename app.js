@@ -133,26 +133,37 @@ function setVisible(element, visible) {
 }
 
 function showAuth() {
+    pageHistory = [];
+    document.body.classList.remove("dashboard-open");
     setVisible($("authSection"), true);
     setVisible($("resetPasswordSection"), false);
     setVisible($("dashboard"), false);
     setVisible($("logoutButton"), false);
+    setVisible($("accountMenu"), false);
+    $("accountMenuToggle")?.setAttribute("aria-expanded", "false");
     showAuthView("login");
 }
 
 function showResetPassword() {
+    document.body.classList.remove("dashboard-open");
     setVisible($("authSection"), false);
     setVisible($("resetPasswordSection"), true);
     setVisible($("dashboard"), false);
+    setVisible($("accountMenu"), false);
+    $("accountMenuToggle")?.setAttribute("aria-expanded", "false");
 }
 
 function showDashboard() {
+    document.body.classList.add("dashboard-open");
     setVisible($("authSection"), false);
     setVisible($("resetPasswordSection"), false);
     setVisible($("dashboard"), true);
     setVisible($("logoutButton"), true);
+    setVisible($("accountMenu"), false);
+    $("accountMenuToggle")?.setAttribute("aria-expanded", "false");
+    pageHistory = [];
 
-    showPage("overviewPage");
+    showPage("overviewPage", false);
 }
 
 function updateYear() {
@@ -764,6 +775,16 @@ function showPage(pageName, remember = true) {
         button.classList.toggle("active", button.dataset.page === pageId);
     });
 
+    const accountPages = ["settingsPage", "profilePage", "changePasswordPage", "adminPage"];
+    const accountToggle = $("accountMenuToggle");
+    if (accountToggle) {
+        accountToggle.classList.toggle("active", accountPages.includes(pageId));
+    }
+
+    // Close the account menu after a destination has been selected.
+    setVisible($("accountMenu"), false);
+    accountToggle?.setAttribute("aria-expanded", "false");
+
     // Add a contextual back button to every page except Overview.
     document.querySelectorAll(".page-back").forEach(button => button.remove());
     if (pageId !== "overviewPage") {
@@ -782,11 +803,27 @@ function showPage(pageName, remember = true) {
 }
 
 function goBackPage() {
-    const previous = pageHistory.pop();
-    showPage(previous && $(previous) ? previous : "overviewPage", false);
+    let previous = null;
+
+    while (pageHistory.length && !previous) {
+        const candidate = pageHistory.pop();
+        if (candidate && $(candidate)?.classList.contains("page") && candidate !== currentPageId) {
+            previous = candidate;
+        }
+    }
+
+    showPage(previous || "overviewPage", false);
 }
 window.showPage = showPage;
 window.goBackPage = goBackPage;
+
+$("accountMenuToggle")?.addEventListener("click", () => {
+    const menu = $("accountMenu");
+    if (!menu) return;
+    const opening = menu.hidden;
+    setVisible(menu, opening);
+    $("accountMenuToggle").setAttribute("aria-expanded", String(opening));
+});
 
 document.querySelectorAll(".nav-item[data-page]").forEach(button => {
     button.addEventListener("click", () => showPage(button.dataset.page));
@@ -1031,6 +1068,48 @@ $("resetPasswordForm")?.addEventListener("submit", async event => {
         showAuth();
     } catch (error) {
         notify(friendlyError(error), "error");
+    }
+});
+
+/* =========================================================
+   CHANGE PASSWORD WHILE SIGNED IN
+========================================================= */
+$("changePasswordForm")?.addEventListener("submit", async event => {
+    event.preventDefault();
+
+    if (!currentUser) {
+        notify("Please sign in before changing your password.", "error");
+        return;
+    }
+
+    const password = $("accountNewPassword")?.value || "";
+    const confirmation = $("accountConfirmPassword")?.value || "";
+
+    if (password.length < 6) {
+        notify("Your new password must contain at least 6 characters.", "error");
+        return;
+    }
+
+    if (password !== confirmation) {
+        notify("The passwords do not match.", "error");
+        return;
+    }
+
+    const button = event.submitter;
+    if (button) button.disabled = true;
+
+    try {
+        const { error } = await db.auth.updateUser({ password });
+        if (error) throw error;
+
+        $("changePasswordForm").reset();
+        showPage("settingsPage");
+        notify("Password changed successfully.", "success");
+    } catch (error) {
+        console.error("Change password error:", error);
+        notify(friendlyError(error), "error");
+    } finally {
+        if (button) button.disabled = false;
     }
 });
 
