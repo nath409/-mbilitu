@@ -288,3 +288,59 @@ body[data-theme="dark"] .account-menu .account-logout:hover {
     padding-right: 12px;
   }
 }
+/* --- Toast Notification System --- */
+.toast-container {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-width: 360px;
+    width: calc(100% - 48px);
+    pointer-events: none;
+}
+.toast {
+    background: var(--surface);
+    color: var(--ink);
+    border: 1px solid var(--line);
+    padding: 14px 18px;
+    border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(18, 59, 112, 0.15);
+    font-size: 13px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    pointer-events: auto;
+    animation: toastSlideIn .25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+.toast.success { border-left: 4px solid var(--green); }
+.toast.error { border-left: 4px solid var(--red); }
+.toast.info { border-left: 4px solid var(--blue); }
+
+@keyframes toastSlideIn {
+    from { opacity: 0; transform: translateY(20px) scale(0.95); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes toastFadeOut {
+    to { opacity: 0; transform: translateY(10px) scale(0.95); }
+}
+
+/* --- Mobile Touch & Keyboard Stabilization --- */
+@media (max-width: 768px) {
+    /* Prevent layout shifting / viewport jitter on virtual keyboards */
+    body {
+        min-height: 100dvh;
+    }
+    /* Enhance mobile tap targets and prevent accidental text selections */
+    button, .nav-item, .button {
+        touch-action: manipulation;
+    }
+    /* Smooth out mobile bottom nav bar */
+    .mobile-bottom-nav {
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+    }
+}
